@@ -6,12 +6,47 @@ import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { sourceForAccount, type SourceLabel } from "./sources";
 
-// ─── getAccounts ─────────────────────────────────────────────────────────────
-export const getAccounts = query({
+// ─── getPeople ───────────────────────────────────────────────────────────────
+// Seeded people in the household. Used by the viewer card so the header
+// reflects whoever the demo loaded (no auth, no profiles — just the seed).
+export const getPeople = query({
   args: {},
   handler: async (ctx) => {
+    return await ctx.db.query("people").collect();
+  },
+});
+
+// ─── getCurrentViewer ────────────────────────────────────────────────────────
+// Which household member is currently "viewing" the app. Drives every UI
+// surface that needs to filter by ownership/access.
+export const getCurrentViewer = query({
+  args: {},
+  handler: async (ctx) => {
+    const state = await ctx.db.query("householdState").first();
+    if (!state) return null;
+    const person = await ctx.db.get(state.currentViewerId);
+    return person;
+  },
+});
+
+// ─── getAccounts ─────────────────────────────────────────────────────────────
+// If `forViewerId` is passed, only return accounts the viewer can access:
+// their own accounts + any joint/savings accounts shared across the household.
+export const getAccounts = query({
+  args: {
+    forViewerId: v.optional(v.id("people")),
+  },
+  handler: async (ctx, { forViewerId }) => {
     const accounts = await ctx.db.query("accounts").collect();
-    return accounts.map((a) => ({
+    const filtered = forViewerId
+      ? accounts.filter(
+          (a) =>
+            a.ownerId === forViewerId ||
+            a.type === "joint" ||
+            a.type === "savings",
+        )
+      : accounts;
+    return filtered.map((a) => ({
       ...a,
       source: sourceForAccount(a),
     }));
@@ -55,13 +90,16 @@ export const getRecentTransactions = query({
 });
 
 // ─── getAgreements ───────────────────────────────────────────────────────────
+// Agreements are visible to both parties (fromId, toId). If `forViewerId`
+// is passed, only return those where the viewer is involved.
 export const getAgreements = query({
   args: {
     status: v.optional(
       v.union(v.literal("open"), v.literal("requested"), v.literal("settled"))
     ),
+    forViewerId: v.optional(v.id("people")),
   },
-  handler: async (ctx, { status }) => {
+  handler: async (ctx, { status, forViewerId }) => {
     let agreements;
     if (status) {
       agreements = await ctx.db
@@ -72,17 +110,27 @@ export const getAgreements = query({
       agreements = await ctx.db.query("agreements").collect();
     }
 
-    // Enrich with people names
+    if (forViewerId) {
+      agreements = agreements.filter(
+        (a) => a.fromId === forViewerId || a.toId === forViewerId,
+      );
+    }
+
+    // Enrich with people names + display names
     const people = await ctx.db.query("people").collect();
     const nameMap = new Map<string, string>();
+    const displayMap = new Map<string, string>();
     for (const p of people) {
       nameMap.set(p._id, p.name);
+      displayMap.set(p._id, p.displayName ?? p.name);
     }
 
     return agreements.map((a) => ({
       ...a,
       fromName: nameMap.get(a.fromId) ?? "Unknown",
       toName: nameMap.get(a.toId) ?? "Unknown",
+      fromDisplayName: displayMap.get(a.fromId) ?? "Unknown",
+      toDisplayName: displayMap.get(a.toId) ?? "Unknown",
       source: "inbox" as const,
     }));
   },
@@ -97,15 +145,23 @@ export const getGoals = query({
 });
 
 // ─── getCards ────────────────────────────────────────────────────────────────
+// If `forViewerId` is passed, only return cards belonging to that viewer.
+// Cards with no `forPersonId` are treated as shared (visible to all).
 export const getCards = query({
   args: {
     includeResolved: v.optional(v.boolean()),
+    forViewerId: v.optional(v.id("people")),
   },
-  handler: async (ctx, { includeResolved = false }) => {
+  handler: async (ctx, { includeResolved = false, forViewerId }) => {
     const cards = await ctx.db.query("cards").collect();
-    const filtered = includeResolved
+    let filtered = includeResolved
       ? cards
       : cards.filter((c) => c.status === "open");
+    if (forViewerId) {
+      filtered = filtered.filter(
+        (c) => !c.forPersonId || c.forPersonId === forViewerId,
+      );
+    }
     // Sort: critical > warn > info, then newest first.
     const sevRank = { critical: 0, warn: 1, info: 2 } as const;
     filtered.sort((a, b) => {

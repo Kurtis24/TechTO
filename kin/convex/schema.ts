@@ -7,8 +7,20 @@ import { v } from "convex/values";
 export default defineSchema({
   people: defineTable({
     name: v.string(),
-    role: v.string(), // "primary" | "partner" | etc — kept open
+    role: v.string(), // "primary" | "partner" | "child" — kept open
     phone: v.optional(v.string()), // E.164 ("+14165551234") — outbound SMS target
+    // Optional richer profile fields. Optional so older seeded rows still
+    // validate when the schema is bumped without a reseed.
+    displayName: v.optional(v.string()),
+    avatarColor: v.optional(v.string()), // CSS color for the avatar tile
+    accentColor: v.optional(v.string()), // CSS color for tile accents
+    relationship: v.optional(v.string()), // "Partner" | "Spouse" | "Roommate" | "Child"
+  }),
+
+  // Singleton — there's only ever one row. Tracks which household member's
+  // view the UI is currently rendering. No auth; pure demo state.
+  householdState: defineTable({
+    currentViewerId: v.id("people"),
   }),
 
   // Daily-briefing opt-in. One row per phone. Phone uniqueness enforced in code,
@@ -123,9 +135,9 @@ export default defineSchema({
       v.literal("dismissed"),
     ),
     createdAt: v.number(), // unix ms
-    // Deprecated — do not write; optional only so old rows pass schema check until wiped.
     forPersonId: v.optional(v.id("people")),
   })
     .index("by_status", ["status"])
-    .index("by_status_and_severity", ["status", "severity"]),
+    .index("by_status_and_severity", ["status", "severity"])
+    .index("by_for_person", ["forPersonId"]),
 });

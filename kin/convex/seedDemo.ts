@@ -71,6 +71,7 @@ export const seedDemo = mutation({
       "subscribers",
       "phoneAssistants",
       "agentState",
+      "householdState",
     ] as const;
     for (const table of tables) {
       const docs = await ctx.db.query(table).collect();
@@ -80,13 +81,28 @@ export const seedDemo = mutation({
     }
 
     // ── People ───────────────────────────────────────────────────────────────
+    // Display fields (displayName/avatarColor/relationship) drive the UI so
+    // nothing about who's in the household is hardcoded in components.
     const alexId = await ctx.db.insert("people", {
       name: "Alex",
+      displayName: "Alex Chen",
       role: "primary",
+      relationship: "Primary",
+      avatarColor: "#ff8a4a", // ember — matches Kin's accent on the primary
+      accentColor: "#6dd28e",
     });
     const danaId = await ctx.db.insert("people", {
       name: "Dana",
+      displayName: "Dana Park",
       role: "partner",
+      relationship: "Partner",
+      avatarColor: "#7aa9ff",
+      accentColor: "#7aa9ff",
+    });
+
+    // ── Household state: who is currently viewing ────────────────────────────
+    await ctx.db.insert("householdState", {
+      currentViewerId: alexId,
     });
 
     // ── Accounts ─────────────────────────────────────────────────────────────
@@ -466,6 +482,15 @@ export const seedDemo = mutation({
       reason: "cottage trip deposit alex fronted",
       status: "open",
     });
+    // A smaller reverse agreement so Dana's view has something too — Alex
+    // covered groceries on a joint trip last weekend.
+    await ctx.db.insert("agreements", {
+      fromId: alexId,
+      toId: danaId,
+      amountCents: BigInt(6500), // $65
+      reason: "groceries dana covered last weekend",
+      status: "open",
+    });
 
     // ── Goal ─────────────────────────────────────────────────────────────────
     // "$5k trip by December" — December 1 2026
@@ -540,6 +565,7 @@ export const seedDemo = mutation({
       actions: [],
       status: "dismissed",
       createdAt: monthsAgo(1, 20),
+      forPersonId: alexId,
     });
 
     // ── Upcoming: rent autopay (not yet executed — it's in the future) ───────
@@ -592,6 +618,7 @@ export const seedDemo = mutation({
       ],
       status: "open",
       createdAt: now(),
+      forPersonId: alexId,
     });
 
     return {

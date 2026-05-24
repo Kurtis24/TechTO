@@ -449,11 +449,29 @@ export const bootstrapDemo = action({
     await ctx.runMutation(api.engine.runDetection, {});
     const cards = await ctx.runQuery(api.queries.getCards, {});
     const overdraft = cards.find((c) => c.type === "overdraft");
-    if (!overdraft) return { ok: false, cardId: null, message: "No overdraft card" };
-    const res = await ctx.runAction(api.agent.runAgent, {
-      cardId: overdraft._id,
-    });
-    return { ok: true, cardId: overdraft._id, message: res.message };
+    if (!overdraft) {
+      return {
+        ok: true,
+        cardId: null,
+        message: "Seeded. Byproduct cards visible; no overdraft surfaced.",
+      };
+    }
+    // Backboard is non-fatal here — if it's down the engine card still renders
+    // and the user can retry via "Have Kin reason about this".
+    try {
+      const res = await ctx.runAction(api.agent.runAgent, {
+        cardId: overdraft._id,
+      });
+      return { ok: true, cardId: overdraft._id, message: res.message };
+    } catch (err) {
+      console.error("bootstrapDemo: runAgent failed (non-fatal):", err);
+      return {
+        ok: true,
+        cardId: overdraft._id,
+        message:
+          "Seeded. Backboard unavailable — showing engine output. Tap 'Have Kin reason about this' to retry.",
+      };
+    }
   },
 });
 

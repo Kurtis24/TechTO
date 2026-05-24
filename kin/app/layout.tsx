@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { ConvexClientProvider } from "./ConvexClientProvider";
+import { ToastProvider } from "./components/Toast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -45,7 +46,9 @@ export default function RootLayout({
             Pointer-events disabled so it never interferes with the feed. */}
         <div className="kin-ambient" aria-hidden="true" />
         <div className="kin-grain" aria-hidden="true" />
-        <ConvexClientProvider>{children}</ConvexClientProvider>
+        <ConvexClientProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </ConvexClientProvider>
       </body>
     </html>
   );
