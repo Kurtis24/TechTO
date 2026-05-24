@@ -15,13 +15,16 @@
 
 import { action } from "./_generated/server";
 import { v } from "convex/values";
-// @ts-expect-error — backboard-sdk has no published types as of writing
-import { BackboardClient } from "backboard-sdk";
+import { BackboardClient, type ChatMessagesResponse } from "backboard-sdk";
 
 const MODEL = {
   llm_provider: "openrouter",
   model_name: "moonshotai/kimi-k2.6",
 };
+
+// sendMessage / submitToolOutputsSimple return ChatMessagesResponse | AsyncGenerator
+// (the latter only when stream:true). We never stream in the spike.
+const asChat = (r: unknown) => r as ChatMessagesResponse;
 
 export const backboardSpike = action({
   args: { reset: v.optional(v.boolean()) },
@@ -35,13 +38,18 @@ export const backboardSpike = action({
     const client = new BackboardClient({ apiKey });
 
     // (a) First message — creates an assistant + thread server-side.
-    const hello = await client.sendMessage({
-      content: "Say hi in 5 words.",
-      memory: "Auto",
-      ...MODEL,
-    });
-    const assistantId: string = hello.assistantId;
-    const threadId: string = hello.threadId;
+    const hello = asChat(
+      await client.sendMessage({
+        content: "Say hi in 5 words.",
+        memory: "Auto",
+        ...MODEL,
+      }),
+    );
+    const assistantId = hello.assistantId;
+    const threadId = hello.threadId;
+    if (!assistantId || !threadId) {
+      throw new Error("Backboard did not return assistantId/threadId on first call.");
+    }
 
     // (b) Store a memory item scoped to this assistant.
     await client.addMemory(assistantId, {
@@ -51,11 +59,8 @@ export const backboardSpike = action({
     });
 
     // (c) Semantic retrieval.
-    const memoryHits = await client.searchMemories(
-      assistantId,
-      "who owes whom money",
-      5,
-    );
+    const memoryHits: Array<{ score?: number; content: string }> =
+      await client.searchMemories(assistantId, "who owes whom money", 5);
 
     // (d) Tool-call roundtrip.
     const moveMoneyTool = {
@@ -75,42 +80,46 @@ export const backboardSpike = action({
       },
     };
 
-    const toolPrompt = await client.sendMessage({
-      content:
-        "Alex has $1,650 in chequing (acct:alex_chq) and rent autopays $2,100 Saturday. " +
-        "Use the move_money tool to pull $500 from joint_savings to alex_chq as backup.",
-      assistantId,
-      threadId,
-      tools: [moveMoneyTool],
-      ...MODEL,
-    });
+    const toolPrompt = asChat(
+      await client.sendMessage({
+        content:
+          "Alex has $1,650 in chequing (acct:alex_chq) and rent autopays $2,100 Saturday. " +
+          "Use the move_money tool to pull $500 from joint_savings to alex_chq as backup.",
+        assistantId,
+        threadId,
+        tools: [moveMoneyTool],
+        ...MODEL,
+      }),
+    );
 
     let toolRoundtrip:
-      | { invoked: false; status: string; reply: string }
+      | { invoked: false; status: string | null; reply: string | null }
       | {
           invoked: true;
           toolName: string;
-          args: unknown;
-          finalStatus: string;
-          finalReply: string;
+          args: Record<string, unknown>;
+          finalStatus: string | null;
+          finalReply: string | null;
         };
 
     if (
       toolPrompt.status === "REQUIRES_ACTION" &&
-      Array.isArray(toolPrompt.toolCalls) &&
+      toolPrompt.toolCalls &&
       toolPrompt.toolCalls.length > 0
     ) {
       const tc = toolPrompt.toolCalls[0];
       const args = tc.function.parsedArguments;
-      const finished = await client.submitToolOutputsSimple({
-        threadId: toolPrompt.threadId,
-        toolOutputs: [
-          {
-            tool_call_id: tc.id,
-            output: JSON.stringify({ ok: true, moved_cents: args.amount_cents }),
-          },
-        ],
-      });
+      const finished = asChat(
+        await client.submitToolOutputsSimple({
+          threadId,
+          toolOutputs: [
+            {
+              tool_call_id: tc.id,
+              output: JSON.stringify({ ok: true, moved_cents: args.amount_cents }),
+            },
+          ],
+        }),
+      );
       toolRoundtrip = {
         invoked: true,
         toolName: tc.function.name,
@@ -130,10 +139,7 @@ export const backboardSpike = action({
       assistantId,
       threadId,
       helloReply: hello.content,
-      memoryHits: memoryHits.map((m: { score: number; content: string }) => ({
-        score: m.score,
-        content: m.content,
-      })),
+      memoryHits: memoryHits.map((m) => ({ score: m.score, content: m.content })),
       toolRoundtrip,
     };
   },
