@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAction } from "convex/react";
+import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useToast, type ToastVariant } from "./Toast";
@@ -217,6 +218,7 @@ export function ByproductCard({ card }: { card: CardDoc }) {
   const { push } = useToast();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [cancelAction, setCancelAction] = useState<CardAction | null>(null);
   const meta = META[card.type];
 
   const handle = async (action: CardAction) => {
@@ -224,18 +226,13 @@ export function ByproductCard({ card }: { card: CardDoc }) {
     const r = receiptFor(card, action);
     setPendingId(action.id);
 
-    // Optimistic: show the inline confirmation + toast immediately so the
-    // user gets feedback before the card unmounts via the reactive query.
     setReceipt(r);
     push(r.toast);
 
     try {
-      // Hold the mutation back briefly so the inline confirmation is actually
-      // visible before the card slides out of the feed.
       await new Promise((resolve) => setTimeout(resolve, 900));
       await executeAction({ cardId: card._id, actionId: action.id });
     } catch (err) {
-      // Revert UI; surface the error.
       setReceipt(null);
       setPendingId(null);
       push({
@@ -246,75 +243,129 @@ export function ByproductCard({ card }: { card: CardDoc }) {
     }
   };
 
+  const onActionClick = (action: CardAction) => {
+    if (action.kind === "cancel_subscription") {
+      setCancelAction(action);
+    } else {
+      handle(action);
+    }
+  };
+
+  const merchant =
+    cancelAction
+      ? ((cancelAction.params as Record<string, unknown>)?.merchant as string | undefined) ??
+        extractSubject(card.title)
+      : "";
+
   return (
-    <div
-      className={`flex items-start gap-4 px-5 py-4 ${
-        receipt ? "kin-card-leaving" : ""
-      }`}
-    >
-      {/* Glyph + colored ring */}
+    <>
       <div
-        className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full"
-        style={{
-          color: meta.color,
-          background: "rgba(0, 0, 0, 0.35)",
-          border: `1px solid ${meta.color}33`,
-          boxShadow: `0 0 24px -8px ${meta.color}55`,
-        }}
-        aria-hidden="true"
+        className={`flex items-start gap-4 px-5 py-4 ${
+          receipt ? "kin-card-leaving" : ""
+        }`}
       >
-        {meta.glyph}
-      </div>
-
-      {/* Body */}
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span
-            className="text-[10px] uppercase tracking-[0.22em]"
-            style={{ color: meta.color, fontFamily: "var(--font-mono)" }}
-          >
-            {meta.label}
-          </span>
-          <h3 className="truncate text-[15px] font-medium text-kin-bone">
-            {card.title}
-          </h3>
+        {/* Glyph + colored ring */}
+        <div
+          className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full"
+          style={{
+            color: meta.color,
+            background: "rgba(0, 0, 0, 0.35)",
+            border: `1px solid ${meta.color}33`,
+            boxShadow: `0 0 24px -8px ${meta.color}55`,
+          }}
+          aria-hidden="true"
+        >
+          {meta.glyph}
         </div>
-        <p className="mt-1 text-[13px] leading-relaxed text-kin-bone-mute">
-          {card.body}
-        </p>
 
-        {card.actions.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            {receipt ? (
-              <span className="kin-action-done">
-                <CheckGlyph />
-                {receipt.inline}
-              </span>
-            ) : (
-              card.actions.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => handle(a)}
-                  disabled={pendingId !== null}
-                  className="kin-btn-pill"
-                  aria-label={a.label}
-                >
-                  {pendingId === a.id ? (
-                    <>
-                      <PillSpinner />
-                      Working…
-                    </>
-                  ) : (
-                    a.label
-                  )}
-                </button>
-              ))
-            )}
+        {/* Body */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <span
+              className="text-[10px] uppercase tracking-[0.22em]"
+              style={{ color: meta.color, fontFamily: "var(--font-mono)" }}
+            >
+              {meta.label}
+            </span>
+            <h3 className="truncate text-[15px] font-medium text-kin-bone">
+              {card.title}
+            </h3>
           </div>
-        )}
+          <p className="mt-1 text-[13px] leading-relaxed text-kin-bone-mute">
+            {card.body}
+          </p>
+
+          {card.actions.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {receipt ? (
+                <span className="kin-action-done">
+                  <CheckGlyph />
+                  {receipt.inline}
+                </span>
+              ) : (
+                card.actions.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => onActionClick(a)}
+                    disabled={pendingId !== null}
+                    className="kin-btn-pill"
+                    aria-label={a.label}
+                  >
+                    {pendingId === a.id ? (
+                      <>
+                        <PillSpinner />
+                        Working…
+                      </>
+                    ) : (
+                      a.label
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Cancel subscription confirmation dialog */}
+      <AlertDialog.Root
+        open={cancelAction !== null}
+        onOpenChange={(open) => { if (!open) setCancelAction(null); }}
+      >
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="kin-dialog-overlay" />
+          <AlertDialog.Content className="kin-dialog">
+            <div className="kin-dialog-icon" aria-hidden="true">
+              <TrashGlyph />
+            </div>
+            <AlertDialog.Title className="kin-dialog-title">
+              Cancel {merchant}?
+            </AlertDialog.Title>
+            <AlertDialog.Description className="kin-dialog-desc">
+              Kin will handle the cancellation and confirm once it&rsquo;s done.
+              This can&rsquo;t be undone from here.
+            </AlertDialog.Description>
+            <div className="kin-dialog-actions">
+              <AlertDialog.Cancel asChild>
+                <button type="button" className="kin-btn kin-btn-ghost kin-dialog-cancel">
+                  Keep it
+                </button>
+              </AlertDialog.Cancel>
+              <AlertDialog.Action asChild>
+                <button
+                  type="button"
+                  className="kin-btn kin-btn-danger"
+                  onClick={() => cancelAction && handle(cancelAction)}
+                >
+                  Yes, cancel it
+                </button>
+              </AlertDialog.Action>
+            </div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
+    </>
   );
 }
 
@@ -326,6 +377,21 @@ function CheckGlyph() {
         fill="none"
         stroke="currentColor"
         strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function TrashGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path
+        d="M2.5 4h11M6 4V2.5h4V4M7 7v4.5M9 7v4.5M3.5 4l.75 9h7.5l.75-9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

@@ -150,6 +150,46 @@ export async function executeSmsPlanStep(
       case "convex_run_detection":
         return ok(tool, await ctx.runMutation(api.engine.runDetection, {}));
 
+      case "convex_create_goal":
+        return ok(
+          tool,
+          await ctx.runMutation(api.mutations.createGoal, {
+            name: args.name as string,
+            targetCents: BigInt(args.targetCents as number),
+            deadline: args.deadline as number,
+            savedCents: args.savedCents !== undefined ? BigInt(args.savedCents as number) : undefined,
+          }),
+        );
+
+      case "convex_update_goal":
+        return ok(
+          tool,
+          await ctx.runMutation(api.mutations.updateGoal, {
+            goalId: args.goalId as Id<"goals">,
+            name: args.name as string | undefined,
+            targetCents: args.targetCents !== undefined ? BigInt(args.targetCents as number) : undefined,
+            deadline: args.deadline as number | undefined,
+            savedCents: args.savedCents !== undefined ? BigInt(args.savedCents as number) : undefined,
+          }),
+        );
+
+      case "convex_delete_goal":
+        return ok(
+          tool,
+          await ctx.runMutation(api.mutations.deleteGoal, {
+            goalId: args.goalId as Id<"goals">,
+          }),
+        );
+
+      case "convex_add_savings_to_goal":
+        return ok(
+          tool,
+          await ctx.runMutation(api.mutations.addSavingsToGoal, {
+            goalId: args.goalId as Id<"goals">,
+            amountCents: BigInt(args.amountCents as number),
+          }),
+        );
+
       case "convex_create_message_card":
         return ok(
           tool,

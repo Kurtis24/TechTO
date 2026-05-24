@@ -79,10 +79,7 @@ export function ViewerCard({
     return (
       <div className="kin-viewer kin-viewer-skeleton" aria-busy="true">
         <span className="kin-viewer-avatar" aria-hidden="true" />
-        <div className="kin-viewer-body">
-          <span className="kin-viewer-name">&nbsp;</span>
-          <span className="kin-viewer-sub">&nbsp;</span>
-        </div>
+        <span className="kin-viewer-name" style={{ width: 72, height: 14, background: "rgba(255,222,188,0.06)", borderRadius: 4, display: "inline-block" }} />
       </div>
     );
   }
@@ -109,20 +106,14 @@ export function ViewerCard({
         >
           {initial(currentViewer.name)}
         </span>
-        <div className="kin-viewer-body">
-          <div className="kin-viewer-row">
-            <span className="kin-viewer-eyebrow">Viewing as</span>
-            <span className="kin-viewer-name">{display}</span>
-          </div>
-          <div className="kin-viewer-sub">{subWithContext}</div>
-        </div>
+        <span className="kin-viewer-name">{display}</span>
         <span className="kin-viewer-chevron" aria-hidden="true">
-          <svg viewBox="0 0 12 12" width="10" height="10">
+          <svg viewBox="0 0 12 12" width="9" height="9">
             <path
               d="M2.5 4.5l3.5 3 3.5-3"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.6"
+              strokeWidth="1.7"
               strokeLinecap="round"
               strokeLinejoin="round"
             />

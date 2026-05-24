@@ -28,6 +28,7 @@ export const metadata: Metadata = {
   title: "Kin — your household’s financial guardian",
   description:
     "Kin sees across every account, and acts before money problems happen.",
+  themeColor: "#0a0807",
 };
 
 export default function RootLayout({

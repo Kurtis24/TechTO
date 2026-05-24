@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatMoney, formatMoneyShort } from "./format";
+import { formatMoney } from "./format";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Account = {
@@ -95,7 +95,7 @@ function bankShortName(institution: string): string {
   const trimmed = institution.trim();
   if (/td bank/i.test(trimmed)) return "TD";
   if (/^rbc/i.test(trimmed)) return "RBC";
-  if (/tangerine/i.test(trimmed)) return "Tangerine";
+  if (/tangerine/i.test(trimmed)) return "Tang.";
   return trimmed;
 }
 
@@ -248,7 +248,7 @@ function OwedTile({
           fontFeatureSettings: '"tnum"',
         }}
       >
-        {formatMoneyShort(agreement.amountCents)}
+        {formatMoney(agreement.amountCents)}
       </div>
 
       <div className="kin-account-meta">
@@ -259,6 +259,84 @@ function OwedTile({
         <span className="kin-account-type">{reason}</span>
       </div>
     </article>
+  );
+}
+
+function AgreementBar({
+  agreement,
+  viewerId,
+}: {
+  agreement: Agreement;
+  viewerId: Id<"people"> | null;
+}) {
+  const flash = useFlashOnChange(agreement.amountCents);
+  const isSettled = agreement.status === "settled";
+  const isRequested = agreement.status === "requested";
+  const viewerIsCreditor = viewerId === agreement.toId;
+  const viewerIsDebtor = viewerId === agreement.fromId;
+
+  const fromDisplay = agreement.fromDisplayName ?? agreement.fromName;
+  const toDisplay = agreement.toDisplayName ?? agreement.toName;
+
+  const label = isSettled
+    ? "Settled"
+    : viewerIsCreditor
+      ? "Owed to you"
+      : viewerIsDebtor
+        ? "You owe"
+        : "Agreement";
+
+  const party = isSettled
+    ? `${fromDisplay} → ${toDisplay}`
+    : viewerIsCreditor
+      ? `From ${fromDisplay}`
+      : viewerIsDebtor
+        ? `To ${toDisplay}`
+        : `${fromDisplay} → ${toDisplay}`;
+
+  const reason = agreement.reason
+    ? agreement.reason.replace(/^./, (c) => c.toUpperCase())
+    : "Household";
+
+  const statusLabel = isSettled ? "Settled" : isRequested ? "Request sent" : "Open";
+
+  const accentColor = isSettled
+    ? "var(--kin-good)"
+    : isRequested
+      ? "var(--kin-amber-soft)"
+      : "var(--kin-ember-soft)";
+
+  return (
+    <div
+      className="kin-agreement-bar"
+      aria-label={`${label}: ${party} · ${formatMoney(agreement.amountCents)} · ${statusLabel}`}
+    >
+      <span
+        className="kin-agreement-dot"
+        style={{ background: accentColor }}
+        aria-hidden="true"
+      />
+      <span className="kin-agreement-label" style={{ color: accentColor }}>
+        {label}
+      </span>
+      <span className="kin-agreement-sep" aria-hidden="true">·</span>
+      <span className="kin-agreement-party">{party}</span>
+      <span className="kin-agreement-sep" aria-hidden="true">·</span>
+      <span className="kin-agreement-reason">{reason}</span>
+      <span className="kin-agreement-spacer" aria-hidden="true" />
+      <span
+        className={`kin-agreement-amount ${flash ? "kin-flash" : ""}`}
+        style={{ fontFamily: "var(--font-serif)", color: accentColor }}
+      >
+        {formatMoney(agreement.amountCents)}
+      </span>
+      <span
+        className="kin-agreement-status"
+        style={{ color: accentColor }}
+      >
+        {statusLabel}
+      </span>
+    </div>
   );
 }
 
@@ -273,10 +351,10 @@ export function AccountStrip({ accounts, agreements, people, viewerId }: Props) 
   };
   const sortedAccounts = [...accounts].sort((a, b) => ownership(a) - ownership(b));
 
-  // Pick the most relevant agreement to surface as a tile (open ones first).
+  // Active agreement for the ledger bar below the tiles.
   const activeAgreement =
     agreements.find((a) => a.status === "open" || a.status === "requested") ??
-    agreements[0];
+    agreements.find((a) => a.status === "settled");
 
   return (
     <div>
@@ -295,10 +373,10 @@ export function AccountStrip({ accounts, agreements, people, viewerId }: Props) 
             viewerId={viewerId}
           />
         ))}
-        {activeAgreement && (
-          <OwedTile agreement={activeAgreement} viewerId={viewerId} />
-        )}
       </div>
+      {activeAgreement && (
+        <AgreementBar agreement={activeAgreement} viewerId={viewerId} />
+      )}
     </div>
   );
 }
