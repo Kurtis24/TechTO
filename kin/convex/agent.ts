@@ -453,4 +453,149 @@ export const bootstrapDemo = action({
   },
 });
 
+// ─── chatReply ───────────────────────────────────────────────────────────────
+// Inbound SMS → agent reply. One Backboard assistant per phone, so
+// conversation memory accumulates per person across messages.
+// Returns the reply string (the http webhook handles sending it via Twilio).
+export const chatReply = action({
+  args: { phone: v.string(), body: v.string() },
+  handler: async (ctx, { phone, body }): Promise<{ reply: string }> => {
+    // ── 1. Pull current household snapshot for context ──────────────────────
+    const accounts = await ctx.runQuery(api.queries.getAccounts, {});
+    const agreements = await ctx.runQuery(api.queries.getAgreements, {});
+    const cards = await ctx.runQuery(api.queries.getCards, {});
+
+    const subs = await ctx.runQuery(api.queries.getSubscribers, {
+      activeOnly: false,
+    });
+    const sub = subs.find((s) => s.phone === phone);
+    const senderName = sub?.name ?? "there";
+
+    const balanceLines = accounts
+      .map((a) => `- ${a.institution} ${a.type}: ${dollars(a.balanceCents)}`)
+      .join("\n");
+    const agreementLines = agreements
+      .filter((a) => a.status !== "settled")
+      .map(
+        (a) =>
+          `- ${a.fromName} owes ${a.toName} ${dollars(a.amountCents)} (${a.reason}, ${a.status})`,
+      )
+      .join("\n");
+    const alertLines = cards
+      .slice(0, 5)
+      .map((c) => `- [${c.severity}] ${c.title}`)
+      .join("\n");
+
+    // ── 2. Per-phone assistant: get or create ──────────────────────────────
+    const bb = backboard();
+    let pa = await ctx.runMutation(api.mutations.getPhoneAssistant, { phone });
+
+    if (!pa) {
+      const boot = asChat(
+        await bb.sendMessage({
+          content:
+            `You are Kin, a calm household financial guardian texting with ${senderName}. Acknowledge in 5 words.`,
+          memory: "Auto",
+          ...MODEL,
+        }),
+      );
+      if (!boot.assistantId || !boot.threadId) {
+        return {
+          reply:
+            "Hi — Kin here. I'm having trouble waking up right now, try again in a minute.",
+        };
+      }
+      await ctx.runMutation(api.mutations.setPhoneAssistant, {
+        phone,
+        assistantId: boot.assistantId,
+        threadId: boot.threadId,
+      });
+      pa = {
+        assistantId: boot.assistantId,
+        threadId: boot.threadId,
+        primed: false,
+      };
+    }
+
+    // ── 3. Prime memory once with the household context (per phone) ────────
+    if (!pa.primed) {
+      const priming = [
+        `Texter: ${senderName} (phone ${phone}).`,
+        `Accounts:\n${balanceLines || "(none)"}`,
+        `Open agreements:\n${agreementLines || "(none)"}`,
+      ];
+      for (const content of priming) {
+        try {
+          await bb.addMemory(pa.assistantId, {
+            content,
+            metadata: { source: "kin-sms", kind: "sms-context", phone },
+          });
+        } catch (e) {
+          console.error("addMemory failed (non-fatal):", e);
+        }
+      }
+      await ctx.runMutation(api.mutations.markPhoneAssistantPrimed, { phone });
+    }
+
+    // ── 4. Ask the LLM ──────────────────────────────────────────────────────
+    const systemContext = `
+LIVE CONTEXT (use only what's relevant; do NOT dump it all):
+Accounts:
+${balanceLines || "(none)"}
+
+Open / requested agreements:
+${agreementLines || "(none)"}
+
+Recent alerts:
+${alertLines || "(none)"}
+`.trim();
+
+    const prompt = `
+You are Kin, a calm household financial guardian replying to a text message from ${senderName}.
+
+${systemContext}
+
+${senderName}'s message:
+"${body}"
+
+Reply rules:
+- 1-3 sentences, max ~320 characters (one SMS segment when possible).
+- Plain prose. No emoji, no markdown, no bullet lists.
+- If the user asks a factual question, answer using the LIVE CONTEXT above. Use exact dollar amounts from it.
+- If the user asks Kin to do something concrete (move money, send e-transfer, call), say "I can do that — open the app to confirm with one tap" rather than promising.
+- If you don't know, say so briefly.
+Return ONLY the reply text.
+    `.trim();
+
+    let reply = "";
+    try {
+      const r = asChat(
+        await bb.sendMessage({
+          content: prompt,
+          assistantId: pa.assistantId,
+          threadId: pa.threadId,
+          memory: "Auto",
+          ...MODEL,
+        }),
+      );
+      reply = (r.content ?? "").trim();
+      if (r.threadId && r.threadId !== pa.threadId) {
+        await ctx.runMutation(api.mutations.updatePhoneAssistantThread, {
+          phone,
+          threadId: r.threadId,
+        });
+      }
+    } catch (err) {
+      console.error("chatReply Backboard error:", err);
+    }
+
+    if (!reply) {
+      reply = `Got your message, ${senderName}. Kin's brain is offline for a sec — try again or open the app to see your accounts.`;
+    }
+    if (reply.length > 1500) reply = reply.slice(0, 1497) + "…";
+
+    return { reply };
+  },
+});
+
 export type { Id };

@@ -117,6 +117,16 @@ export const getCards = query({
   },
 });
 
+// ─── getSubscribers ──────────────────────────────────────────────────────────
+// Daily-briefing recipients. Used by the cron + the briefing action.
+export const getSubscribers = query({
+  args: { activeOnly: v.optional(v.boolean()) },
+  handler: async (ctx, { activeOnly = true }) => {
+    const all = await ctx.db.query("subscribers").collect();
+    return activeOnly ? all.filter((s) => s.active) : all;
+  },
+});
+
 // ─── getSubscriptions ────────────────────────────────────────────────────────
 export const getSubscriptions = query({
   args: {
