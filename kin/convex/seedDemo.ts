@@ -68,6 +68,9 @@ export const seedDemo = mutation({
       "goals",
       "subscriptions",
       "cards",
+      "subscribers",
+      "phoneAssistants",
+      "agentState",
     ] as const;
     for (const table of tables) {
       const docs = await ctx.db.query(table).collect();
@@ -456,7 +459,7 @@ export const seedDemo = mutation({
     }
 
     // ── Agreement ────────────────────────────────────────────────────────────
-    await ctx.db.insert("agreements", {
+    const agreementId = await ctx.db.insert("agreements", {
       fromId: danaId,
       toId: alexId,
       amountCents: BigInt(80000), // $800
@@ -549,6 +552,15 @@ export const seedDemo = mutation({
       body: `Alex's chequing has $1,650. Rent of $2,100 autopays Saturday ${new Date(comingSaturday()).toLocaleDateString("en-CA")} — shortfall of ~$450.`,
       actions: [
         {
+          id: "send-etransfer",
+          label: "Send e-transfer request to Dana ($800)",
+          kind: "send_etransfer",
+          params: {
+            agreementId,
+            amountCents: 80000,
+          },
+        },
+        {
           id: "move-from-savings",
           label: "Move $500 from joint savings",
           kind: "move_money",
@@ -556,19 +568,26 @@ export const seedDemo = mutation({
             fromAccountId: jointSavingsId,
             toAccountId: alexChequingId,
             amountCents: 50000,
+            memo: "Kin: overdraft backup",
           },
         },
         {
-          id: "ask-dana",
-          label: "Ask Dana to cover",
-          kind: "call_dana",
-          params: { message: "Rent shortfall — can you transfer $450?" },
+          id: "both",
+          label: "Both — request + move money",
+          kind: "both",
+          params: {
+            agreementId,
+            amountCents: 80000,
+            fromAccountId: jointSavingsId,
+            toAccountId: alexChequingId,
+            moveAmountCents: 50000,
+          },
         },
         {
-          id: "both",
-          label: "Split: savings + Dana",
-          kind: "both",
-          params: {},
+          id: "call-dana",
+          label: "Just call Dana",
+          kind: "call_dana",
+          params: { agreementId },
         },
       ],
       status: "open",

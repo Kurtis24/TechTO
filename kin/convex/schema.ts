@@ -123,6 +123,8 @@ export default defineSchema({
       v.literal("dismissed"),
     ),
     createdAt: v.number(), // unix ms
+    // Deprecated — do not write; optional only so old rows pass schema check until wiped.
+    forPersonId: v.optional(v.id("people")),
   })
     .index("by_status", ["status"])
     .index("by_status_and_severity", ["status", "severity"]),

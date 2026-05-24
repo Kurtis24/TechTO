@@ -88,6 +88,18 @@ Then seed: call the `seedDemo` mutation from the Convex dashboard (idempotent �
 
 Set `BACKBOARD_API_KEY` + `ELEVENLABS_API_KEY` in the **Convex dashboard** (Settings → Environment Variables) so server-side actions can read them — local `.env.local` does NOT propagate to Convex.
 
+## MCP server (Cursor / agents)
+
+Kin exposes all Convex functions as MCP tools under `kin/mcp-server/`. Inbound SMS uses Backboard LLM semantic routing (`smsLlmRouter`) to pick tools, then executes via `agent.handleInboundSms` (same path as the Twilio webhook). Keyword fallback: `smsRouter.ts`.
+
+```bash
+cd kin/mcp-server && bun install
+bun run test          # offline SMS routing smoke test
+bun run test:live     # + Convex queries (needs CONVEX_URL)
+```
+
+Cursor: copy `kin/.cursor/mcp.json.example` → `kin/.cursor/mcp.json`, set `CONVEX_URL`, restart Cursor. Full guide: [kin/mcp-server/README.md](kin/mcp-server/README.md).
+
 ## Work split
 
 - **Dave** — agent loop, feed UI, hero moment, voice playback, video.

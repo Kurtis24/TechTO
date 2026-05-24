@@ -537,7 +537,7 @@ export const runDetection = mutation({
           actions.push({
             id: "request-owed-funds",
             label: `Send e-Transfer request ($${(Number(relevantAgreement.amountCents) / 100).toFixed(0)} owed)`,
-            kind: "send_etransfer_request",
+            kind: "send_etransfer",
             params: {
               agreementId: relevantAgreement._id,
               fromId: relevantAgreement.fromId,

@@ -26,6 +26,8 @@ import { api } from "./_generated/api";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { BackboardClient, type ChatMessagesResponse } from "backboard-sdk";
+import { executeSmsPlanStep } from "./smsExecutor";
+import { routeInboundSmsWithLlm } from "./smsLlmRouter";
 
 const MODEL = {
   llm_provider: "openrouter",
@@ -255,35 +257,37 @@ export const executeAction = action({
     let memoryNote = "";
 
     switch (action.kind) {
-      case "send_etransfer": {
+      case "send_etransfer":
+      case "send_etransfer_request": {
+        if (!p.agreementId) {
+          throw new Error("send_etransfer: missing agreementId on card action");
+        }
         result = await ctx.runMutation(api.mutations.sendEtransferRequest, {
           agreementId: p.agreementId as Id<"agreements">,
         });
-        memoryNote = `Alex approved: sent e-transfer request to Dana for ${dollars(p.amountCents as number)}.`;
+        memoryNote = `Alex approved: sent e-transfer request to Dana for ${dollars((p.amountCents as number) ?? 80000)}.`;
         resolveAfter = true;
         break;
       }
       case "move_money": {
-        result = await ctx.runMutation(api.mutations.moveMoney, {
-          fromAccountId: p.fromAccountId as Id<"accounts">,
-          toAccountId: p.toAccountId as Id<"accounts">,
-          amountCents: p.amountCents as number,
-          memo: (p.memo as string | undefined) ?? "Kin: transfer",
-        });
-        memoryNote = `Alex approved: moved ${dollars(p.amountCents as number)} from joint savings to chequing as overdraft backup.`;
+        const move = parseMoveMoneyParams(p);
+        result = await ctx.runMutation(api.mutations.moveMoney, move);
+        memoryNote = `Alex approved: moved ${dollars(move.amountCents)} from joint savings to chequing as overdraft backup.`;
         resolveAfter = true;
         break;
       }
       case "both": {
+        const move = parseMoveMoneyParams(p, "moveAmountCents");
         const moved = await ctx.runMutation(api.mutations.moveMoney, {
-          fromAccountId: p.fromAccountId as Id<"accounts">,
-          toAccountId: p.toAccountId as Id<"accounts">,
-          amountCents: p.moveAmountCents as number,
+          ...move,
           memo: "Kin: overdraft backup",
         });
+        if (!p.agreementId) {
+          throw new Error("both: missing agreementId on card action");
+        }
         const requested = await ctx.runMutation(
           api.mutations.sendEtransferRequest,
-          { agreementId: p.agreementId as Id<"agreements"> }
+          { agreementId: p.agreementId as Id<"agreements"> },
         );
         result = { moved, requested };
         memoryNote = `Alex approved BOTH: e-transfer request sent + $500 moved from joint savings to chequing.`;
@@ -453,6 +457,126 @@ export const bootstrapDemo = action({
   },
 });
 
+// ─── handleInboundSms ────────────────────────────────────────────────────────
+// Twilio webhook + MCP kin_handle_inbound_sms share this pipeline:
+// route → execute plan → optional Twilio reply.
+export const handleInboundSms = action({
+  args: {
+    phone: v.string(),
+    body: v.string(),
+    messageSid: v.optional(v.string()),
+    to: v.optional(v.string()),
+    execute: v.optional(v.boolean()),
+    skipMessageCard: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const execute = args.execute ?? true;
+
+    const accounts = await ctx.runQuery(api.queries.getAccounts, {});
+    const cards = await ctx.runQuery(api.queries.getCards, {});
+    const accountHints = accounts
+      .map(
+        (a) =>
+          `${a._id} | ${a.institution} ${a.type} | ${dollars(a.balanceCents)}`,
+      )
+      .join("\n");
+    const openCardHints =
+      cards
+        .slice(0, 8)
+        .map((c) => `- [${c.severity}] ${c.type}: ${c.title}`)
+        .join("\n") || "(none)";
+
+    const plan = await routeInboundSmsWithLlm({
+      from: args.phone,
+      body: args.body,
+      accountHints,
+      openCardHints,
+    });
+
+    // Enrich createMessageCard step with webhook metadata.
+    for (const step of plan.recommendedTools) {
+      if (step.tool === "convex_create_message_card") {
+        step.args = {
+          ...step.args,
+          from: args.phone,
+          body: args.body,
+          to: args.to,
+          messageSid: args.messageSid,
+          receivedAt: Date.now(),
+        };
+      }
+      if (step.tool === "convex_send_sms") {
+        step.args = { ...step.args, to: args.phone };
+      }
+    }
+
+    if (args.skipMessageCard) {
+      plan.recommendedTools = plan.recommendedTools.filter(
+        (s) => s.tool !== "convex_create_message_card",
+      );
+    }
+
+    if (!execute) {
+      return {
+        summary: plan.summary,
+        plan: plan.recommendedTools,
+        routedBy: plan.routedBy,
+        results: [] as Array<{
+          tool: string;
+          ok: boolean;
+          result?: unknown;
+          error?: string;
+        }>,
+        reply: undefined as string | undefined,
+      };
+    }
+
+    const state: { reply?: string } = {};
+    const results = [];
+
+    for (const step of plan.recommendedTools) {
+      const res = await executeSmsPlanStep(ctx, step, state);
+      results.push(res);
+    }
+
+    return {
+      summary: plan.summary,
+      plan: plan.recommendedTools,
+      routedBy: plan.routedBy,
+      results,
+      reply: state.reply,
+    };
+  },
+});
+
+// ─── planInboundSms ──────────────────────────────────────────────────────────
+// Dry-run semantic routing only (Backboard LLM + fallback). For MCP / debugging.
+export const planInboundSms = action({
+  args: { phone: v.string(), body: v.string() },
+  handler: async (ctx, { phone, body }) => {
+    const accounts = await ctx.runQuery(api.queries.getAccounts, {});
+    const cards = await ctx.runQuery(api.queries.getCards, {});
+    const accountHints = accounts
+      .map(
+        (a) =>
+          `${a._id} | ${a.institution} ${a.type} | ${dollars(a.balanceCents)}`,
+      )
+      .join("\n");
+    const openCardHints =
+      cards
+        .slice(0, 8)
+        .map((c) => `- [${c.severity}] ${c.type}: ${c.title}`)
+        .join("\n") || "(none)";
+
+    return await routeInboundSmsWithLlm({
+      from: phone,
+      body,
+      accountHints,
+      openCardHints,
+    });
+  },
+});
+
 // ─── chatReply ───────────────────────────────────────────────────────────────
 // Inbound SMS → agent reply. One Backboard assistant per phone, so
 // conversation memory accumulates per person across messages.
@@ -597,5 +721,30 @@ Return ONLY the reply text.
     return { reply };
   },
 });
+
+function parseMoveMoneyParams(
+  p: Record<string, unknown>,
+  amountKey: "amountCents" | "moveAmountCents" = "amountCents",
+): {
+  fromAccountId: Id<"accounts">;
+  toAccountId: Id<"accounts">;
+  amountCents: number;
+  memo?: string;
+} {
+  const fromAccountId = p.fromAccountId as Id<"accounts"> | null | undefined;
+  const toAccountId = p.toAccountId as Id<"accounts"> | null | undefined;
+  const raw = p[amountKey] ?? p.amountCents ?? p.moveAmountCents;
+  if (!fromAccountId || !toAccountId || raw == null) {
+    throw new Error(
+      `move_money: card action params incomplete (need fromAccountId, toAccountId, ${amountKey}). Re-run seedDemo or runAgent on the overdraft card.`,
+    );
+  }
+  return {
+    fromAccountId,
+    toAccountId,
+    amountCents: Number(raw),
+    memo: (p.memo as string | undefined) ?? "Kin: transfer",
+  };
+}
 
 export type { Id };
