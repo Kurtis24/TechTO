@@ -26,13 +26,27 @@ import { api } from "./_generated/api";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { BackboardClient, type ChatMessagesResponse } from "backboard-sdk";
-import {
-  executeSmsPlanStep,
-  PRELOADED_TOOLS,
-  TERMINAL_TOOLS,
-  type Preloaded,
-} from "./smsExecutor";
+import { executeSmsPlanStep, type Preloaded } from "./smsExecutor";
 import { routeInboundSmsWithLlm } from "./smsLlmRouter";
+
+// Phase classification for the SMS plan. Kept local to this Node-runtime
+// file because Convex's bundler doesn't reliably surface `Set<string>` value
+// exports across the Node ↔ isolate runtime boundary (functions cross fine).
+// The executor handles the preloaded-cache cases by switching on the tool
+// name directly, so it doesn't need its own copy of this set.
+const PRELOADED_TOOLS = new Set<string>([
+  "convex_get_accounts",
+  "convex_get_agreements",
+  "convex_get_cards",
+  "convex_get_subscribers",
+]);
+
+const TERMINAL_TOOLS = new Set<string>([
+  "convex_create_message_card",
+  "convex_chat_reply",
+  "convex_send_briefing",
+  "convex_send_sms",
+]);
 
 const MODEL = {
   llm_provider: "openrouter",
