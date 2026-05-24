@@ -75,13 +75,18 @@ CONVEX_DEPLOYMENT=...             # from `npx convex dev`
 
 ## Run
 
+We use **bun** (faster, resilient on flaky hackathon wifi).
+
 ```bash
 cd kin
-npx convex dev          # one terminal
-npm run dev             # another terminal
+bun install             # first time only
+bunx convex dev         # one terminal — sets CONVEX_DEPLOYMENT + NEXT_PUBLIC_CONVEX_URL in .env.local
+bun dev                 # another terminal
 ```
 
 Then seed: call the `seedDemo` mutation from the Convex dashboard (idempotent — clears + reseeds).
+
+Set `BACKBOARD_API_KEY` + `ELEVENLABS_API_KEY` in the **Convex dashboard** (Settings → Environment Variables) so server-side actions can read them — local `.env.local` does NOT propagate to Convex.
 
 ## Work split
 

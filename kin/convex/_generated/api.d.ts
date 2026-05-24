@@ -8,6 +8,9 @@
  * @module
  */
 
+import type * as queries from "../queries.js";
+import type * as seedDemo from "../seedDemo.js";
+import type * as sources from "../sources.js";
 import type * as spike from "../spike.js";
 
 import type {
@@ -17,6 +20,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  queries: typeof queries;
+  seedDemo: typeof seedDemo;
+  sources: typeof sources;
   spike: typeof spike;
 }>;
 
