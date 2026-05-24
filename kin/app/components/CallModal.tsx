@@ -5,8 +5,16 @@ import { useEffect, useRef, useState } from "react";
 export type CallState =
   | { status: "dialing" }
   | { status: "ringing" }
-  | { status: "connected"; agentAudio: string; danaAudio: string; agentLine: string; danaLine: string }
+  | {
+      status: "connected";
+      agentAudio: string;
+      danaAudio: string;
+      agentLine: string;
+      danaLine: string;
+    }
   | { status: "ended" };
+
+type Stage = "dialing" | "ringing" | "agent" | "dana" | "wrapup" | "done";
 
 export function CallModal({
   state,
@@ -15,19 +23,16 @@ export function CallModal({
   state: CallState | null;
   onClose: () => void;
 }) {
-  const [stage, setStage] = useState<
-    "dialing" | "ringing" | "agent" | "dana" | "wrapup" | "done"
-  >("dialing");
+  const [stage, setStage] = useState<Stage>("dialing");
+  const [elapsed, setElapsed] = useState(0);
   const agentRef = useRef<HTMLAudioElement>(null);
   const danaRef = useRef<HTMLAudioElement>(null);
 
-  // Drive the call animation from the action's response.
   useEffect(() => {
     if (!state) return;
     if (state.status === "dialing") setStage("dialing");
     if (state.status === "ringing") setStage("ringing");
     if (state.status === "connected") {
-      // Sequenced playback: agent line → ~600ms → dana reply → ~800ms → wrapup
       setStage("agent");
       const a = agentRef.current;
       if (a) {
@@ -37,7 +42,16 @@ export function CallModal({
     }
   }, [state]);
 
-  // When the assistant audio finishes, play Dana's reply.
+  // Tick a "call timer" once we're connected — small detail, big realism.
+  useEffect(() => {
+    if (!state) return;
+    if (stage === "dialing" || stage === "ringing" || stage === "done") return;
+    const start = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => setElapsed(Date.now() - start), 1000);
+    return () => clearInterval(id);
+  }, [state, stage]);
+
   const handleAgentEnded = () => {
     setStage("dana");
     setTimeout(() => {
@@ -45,7 +59,6 @@ export function CallModal({
     }, 500);
   };
 
-  // When Dana finishes, show the wrap-up beat.
   const handleDanaEnded = () => {
     setStage("wrapup");
     setTimeout(() => setStage("done"), 1500);
@@ -77,43 +90,162 @@ export function CallModal({
             : "Done."
       : "";
 
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm kin-fade-in">
-      <div className="w-full max-w-md rounded-3xl bg-zinc-950 px-7 py-8 text-zinc-100 shadow-2xl">
-        <div className="flex items-center gap-4">
-          <div
-            className={`grid h-14 w-14 place-items-center rounded-full bg-emerald-500/20 text-emerald-300 ${
-              stage === "ringing" || stage === "dialing" ? "kin-pulse" : ""
-            }`}
-          >
-            <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current">
-              <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.46.57 3.6a1 1 0 0 1-.25 1l-2.22 2.2Z" />
-            </svg>
-          </div>
-          <div>
-            <div className="text-sm uppercase tracking-wide text-zinc-400">
-              {subtitle}
-            </div>
-            <div className="text-lg font-semibold">Dana · RBC partner</div>
-          </div>
-        </div>
+  const isLive = stage === "agent" || stage === "dana";
+  const isWaiting = stage === "dialing" || stage === "ringing";
 
-        <div className="mt-6 min-h-[88px] rounded-2xl bg-zinc-900 px-4 py-3 text-sm leading-relaxed text-zinc-200">
-          {stage === "dialing" || stage === "ringing" ? (
-            <span className="text-zinc-500">— ringing —</span>
-          ) : (
-            <span className="kin-fade-in inline-block">{transcript}</span>
+  const elapsedLabel = formatElapsed(elapsed);
+
+  return (
+    <div
+      className="kin-fade-in fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Call with Dana"
+      style={{ overscrollBehavior: "contain" }}
+    >
+      <div
+        className="kin-card relative w-full max-w-md overflow-hidden px-7 py-8"
+        style={{
+          background:
+            "radial-gradient(120% 80% at 100% 0%, rgba(255, 107, 31, 0.18) 0%, rgba(255, 107, 31, 0.04) 35%, rgba(255, 107, 31, 0) 65%), var(--kin-surface-2)",
+          borderColor: "rgba(255, 107, 31, 0.25)",
+        }}
+      >
+        {/* Top eyebrow */}
+        <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-kin-bone-soft">
+          <span className="inline-flex items-center gap-2">
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                isWaiting ? "kin-pulse" : ""
+              }`}
+              style={{
+                backgroundColor: isLive
+                  ? "var(--kin-good)"
+                  : "var(--kin-amber-soft)",
+              }}
+              aria-hidden="true"
+            />
+            {subtitle}
+          </span>
+          {!isWaiting && (
+            <span
+              className="tabular-nums text-kin-bone-mute"
+              style={{ fontFamily: "var(--font-mono)" }}
+            >
+              {elapsedLabel}
+            </span>
           )}
         </div>
 
-        <div className="mt-5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 kin-pulse" />
-            ElevenLabs · simulated
+        {/* Avatar + name */}
+        <div className="mt-6 flex items-center gap-4">
+          <div className="relative">
+            <div
+              className={`grid h-16 w-16 place-items-center rounded-full ${
+                isWaiting ? "kin-pulse" : ""
+              }`}
+              style={{
+                background:
+                  "radial-gradient(circle at 35% 30%, #ffd56a 0%, #ff6b1f 50%, #6b2306 95%)",
+                boxShadow:
+                  "0 0 0 1px rgba(255, 213, 106, 0.4), 0 0 32px -4px rgba(255, 107, 31, 0.6)",
+              }}
+              aria-hidden="true"
+            >
+              <span
+                className="text-[22px] text-[#1a0d05]"
+                style={{ fontFamily: "var(--font-serif)" }}
+              >
+                D
+              </span>
+            </div>
+            {/* Outer pulsing ring while live */}
+            {isLive && (
+              <span
+                className="pointer-events-none absolute inset-[-6px] rounded-full"
+                style={{
+                  border: "1px solid rgba(255, 107, 31, 0.35)",
+                  animation: "kinPulse 1.6s ease-in-out infinite",
+                }}
+                aria-hidden="true"
+              />
+            )}
+          </div>
+          <div>
+            <div
+              className="text-2xl text-kin-bone"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              <span className="italic">Dana</span>
+            </div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-kin-bone-soft">
+              RBC partner · cottage trip
+            </div>
+          </div>
+        </div>
+
+        {/* Transcript / waveform */}
+        <div
+          className="mt-6 min-h-[112px] rounded-2xl border border-[var(--kin-line)] bg-[rgba(0,0,0,0.4)] px-5 py-4"
+          aria-live="polite"
+        >
+          {isWaiting ? (
+            <div className="flex items-center gap-3 py-2">
+              <RingingDots />
+              <span className="text-sm text-kin-bone-soft">— ringing —</span>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <div className="mt-1.5 shrink-0">
+                <Waveform active={isLive} stage={stage} />
+              </div>
+              <div>
+                <div
+                  className="text-[10px] uppercase tracking-[0.22em]"
+                  style={{
+                    color:
+                      stage === "agent"
+                        ? "var(--kin-ember-soft)"
+                        : "var(--kin-bone-soft)",
+                  }}
+                >
+                  {stage === "agent"
+                    ? "Kin"
+                    : stage === "dana"
+                      ? "Dana"
+                      : "Summary"}
+                </div>
+                <p className="kin-fade-in mt-1 text-[15px] leading-relaxed text-kin-bone">
+                  {transcript}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-kin-bone-dim">
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full bg-kin-amber-soft kin-pulse"
+              aria-hidden="true"
+            />
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              ElevenLabs · simulated
+            </span>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-full bg-rose-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-rose-700"
+            className="kin-btn"
+            style={{
+              background:
+                "linear-gradient(180deg, #2a1612 0%, #1a0d0a 100%)",
+              color: "#ffb094",
+              border: "1px solid rgba(255, 107, 31, 0.4)",
+              padding: "0.5rem 1rem",
+            }}
+            aria-label={stage === "done" ? "Close call" : "End call"}
           >
             {stage === "done" ? "Close" : "End call"}
           </button>
@@ -136,6 +268,75 @@ export function CallModal({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── helpers ───────────────────────────────────────────────────── */
+
+function formatElapsed(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/** A small live "waveform" — five bars that breathe while a speaker is live. */
+function Waveform({ active, stage }: { active: boolean; stage: Stage }) {
+  const color =
+    stage === "agent" ? "var(--kin-ember)" : "var(--kin-bone-mute)";
+  const heights = [10, 16, 22, 14, 8];
+  return (
+    <div className="flex h-6 items-center gap-[3px]">
+      {heights.map((h, i) => (
+        <span
+          key={i}
+          aria-hidden="true"
+          style={{
+            display: "inline-block",
+            width: 2,
+            height: h,
+            borderRadius: 1,
+            backgroundColor: color,
+            opacity: active ? 1 : 0.3,
+            animation: active
+              ? `kinBar 0.9s ease-in-out ${i * 0.08}s infinite alternate`
+              : "none",
+            transformOrigin: "center",
+          }}
+        />
+      ))}
+      <style jsx>{`
+        @keyframes kinBar {
+          from {
+            transform: scaleY(0.4);
+          }
+          to {
+            transform: scaleY(1.2);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function RingingDots() {
+  return (
+    <div className="flex items-center gap-1.5">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          aria-hidden="true"
+          style={{
+            display: "inline-block",
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            backgroundColor: "var(--kin-amber-soft)",
+            animation: `kinPulse 1.2s ease-in-out ${i * 0.18}s infinite`,
+          }}
+        />
+      ))}
     </div>
   );
 }

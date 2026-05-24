@@ -19,26 +19,34 @@ type Agreement = {
   toName: string;
 };
 
-const SOURCE_META: Record<
-  Account["source"],
-  { label: string; sub: string; ring: string }
-> = {
+type SourceMeta = {
+  who: string;
+  bank: string;
+  type: string;
+  // Tailwind-safe inline color so we don't fight the JIT.
+  dotColor: string;
+};
+
+const SOURCE_META: Record<Account["source"], SourceMeta> = {
   "td-alex": {
-    label: "Alex · TD chequing",
-    sub: "td-alex.bank",
-    ring: "ring-emerald-200",
+    who: "Alex",
+    bank: "TD",
+    type: "Chequing",
+    dotColor: "#6dd28e",
   },
   "rbc-dana": {
-    label: "Dana · RBC chequing",
-    sub: "rbc-dana.bank",
-    ring: "ring-blue-200",
+    who: "Dana",
+    bank: "RBC",
+    type: "Chequing",
+    dotColor: "#7aa9ff",
   },
   "tangerine-joint": {
-    label: "Joint · Tangerine",
-    sub: "tangerine-joint.savings",
-    ring: "ring-orange-200",
+    who: "Joint",
+    bank: "Tangerine",
+    type: "Savings",
+    dotColor: "#ff8a4a",
   },
-  inbox: { label: "Inbox", sub: "—", ring: "ring-zinc-200" },
+  inbox: { who: "Inbox", bank: "—", type: "Agreement", dotColor: "#cbbfac" },
 };
 
 /** Highlights briefly whenever the bigint balance value changes. */
@@ -59,18 +67,44 @@ function useFlashOnChange(value: bigint): boolean {
 function AccountTile({ account }: { account: Account }) {
   const meta = SOURCE_META[account.source];
   const flash = useFlashOnChange(account.balanceCents);
+
   return (
     <div
-      className={`rounded-xl border border-zinc-200 bg-white px-4 py-3 ring-1 ${meta.ring} ${
+      className={`kin-card-tile relative overflow-hidden px-4 py-4 ${
         flash ? "kin-flash" : ""
       }`}
     >
-      <div className="text-[11px] uppercase tracking-wide text-zinc-500">
-        {meta.label}
+      {/* Eyebrow: who + bank */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-kin-bone-soft">
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: meta.dotColor }}
+            aria-hidden="true"
+          />
+          {meta.who}
+        </span>
+        <span
+          className="text-[10px] uppercase tracking-[0.18em] text-kin-bone-dim"
+          translate="no"
+        >
+          {meta.bank}
+        </span>
       </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums kin-counter">
+
+      {/* The number — display serif italic. Tabular nums for alignment. */}
+      <div
+        className="kin-counter mt-3 text-[28px] leading-none tracking-tight text-kin-bone tabular-nums"
+        style={{
+          fontFamily: "var(--font-serif)",
+          fontFeatureSettings: '"tnum"',
+        }}
+      >
         {formatMoney(account.balanceCents)}
       </div>
+
+      {/* Type tag */}
+      <div className="mt-2 text-[11px] text-kin-bone-soft">{meta.type}</div>
     </div>
   );
 }
@@ -78,23 +112,65 @@ function AccountTile({ account }: { account: Account }) {
 function OwedPill({ agreement }: { agreement: Agreement }) {
   const flash = useFlashOnChange(agreement.amountCents);
   const isSettled = agreement.status === "settled";
+  const isRequested = agreement.status === "requested";
+
+  const statusLabel = isSettled
+    ? "Settled"
+    : isRequested
+      ? "Request sent"
+      : "Open";
+
+  const statusColor = isSettled
+    ? "var(--kin-good)"
+    : isRequested
+      ? "var(--kin-amber-soft)"
+      : "var(--kin-ember-soft)";
+
   return (
     <div
-      className={`rounded-xl border px-4 py-3 ${
-        isSettled
-          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-          : "border-amber-200 bg-amber-50 text-amber-900"
-      } ${flash ? "kin-flash" : ""}`}
+      className={`kin-card-tile relative overflow-hidden px-4 py-4 ${
+        flash ? "kin-flash" : ""
+      }`}
+      style={{
+        borderColor: isSettled
+          ? "rgba(109, 210, 142, 0.25)"
+          : "rgba(255, 138, 74, 0.22)",
+        background: isSettled
+          ? "linear-gradient(180deg, rgba(109, 210, 142, 0.06) 0%, rgba(109, 210, 142, 0) 100%), var(--kin-surface)"
+          : "linear-gradient(180deg, rgba(255, 138, 74, 0.07) 0%, rgba(255, 138, 74, 0) 100%), var(--kin-surface)",
+      }}
     >
-      <div className="text-[11px] uppercase tracking-wide opacity-75">
-        Inbox · Agreement
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-kin-bone-soft">
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: statusColor }}
+            aria-hidden="true"
+          />
+          Inbox
+        </span>
+        <span
+          className="text-[10px] uppercase tracking-[0.18em]"
+          style={{ color: statusColor }}
+        >
+          {statusLabel}
+        </span>
       </div>
-      <div className="mt-1 text-sm font-medium tabular-nums">
+
+      <div
+        className="mt-3 text-[28px] leading-none tracking-tight text-kin-bone tabular-nums"
+        style={{
+          fontFamily: "var(--font-serif)",
+          fontFeatureSettings: '"tnum"',
+        }}
+      >
+        {formatMoneyShort(agreement.amountCents)}
+      </div>
+
+      <div className="mt-2 text-[11px] text-kin-bone-soft">
         {isSettled
-          ? `Settled — Dana paid ${formatMoneyShort(agreement.amountCents)}`
-          : agreement.status === "requested"
-            ? `${agreement.fromName} owes ${agreement.toName} ${formatMoneyShort(agreement.amountCents)} · request sent`
-            : `${agreement.fromName} owes ${agreement.toName} ${formatMoneyShort(agreement.amountCents)}`}
+          ? `${agreement.fromName} paid ${agreement.toName}`
+          : `${agreement.fromName} owes ${agreement.toName}`}
       </div>
     </div>
   );
@@ -110,12 +186,14 @@ export function AccountStrip({
   const alex = accounts.find((a) => a.source === "td-alex");
   const dana = accounts.find((a) => a.source === "rbc-dana");
   const joint = accounts.find((a) => a.source === "tangerine-joint");
-  const ag = agreements.find(
-    (a) => a.toName === "Alex" && (a.status === "open" || a.status === "requested")
-  ) ?? agreements.find((a) => a.toName === "Alex");
+  const ag =
+    agreements.find(
+      (a) =>
+        a.toName === "Alex" && (a.status === "open" || a.status === "requested"),
+    ) ?? agreements.find((a) => a.toName === "Alex");
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
       {alex && <AccountTile account={alex} />}
       {joint && <AccountTile account={joint} />}
       {dana && <AccountTile account={dana} />}
