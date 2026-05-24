@@ -8,6 +8,10 @@
  * @module
  */
 
+import type * as agent from "../agent.js";
+import type * as agentState from "../agentState.js";
+import type * as engine from "../engine.js";
+import type * as mutations from "../mutations.js";
 import type * as queries from "../queries.js";
 import type * as seedDemo from "../seedDemo.js";
 import type * as sources from "../sources.js";
@@ -20,6 +24,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  agent: typeof agent;
+  agentState: typeof agentState;
+  engine: typeof engine;
+  mutations: typeof mutations;
   queries: typeof queries;
   seedDemo: typeof seedDemo;
   sources: typeof sources;

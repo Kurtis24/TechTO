@@ -65,6 +65,14 @@ export default defineSchema({
     ),
   }).index("by_account", ["accountId"]),
 
+  // Singleton row holding Backboard assistant/thread IDs so memory accumulates
+  // across runAgent invocations (memory keys off assistantId).
+  agentState: defineTable({
+    assistantId: v.string(),
+    threadId: v.string(),
+    primed: v.optional(v.boolean()),
+  }),
+
   cards: defineTable({
     type: v.union(
       v.literal("overdraft"),
