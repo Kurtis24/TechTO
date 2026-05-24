@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "convex": "convex dev"
+    "convex": "convex dev",
+    "mcp": "bun run mcp-server/src/index.ts"
   },
   "dependencies": {
     "backboard-sdk": "^1.5.15",

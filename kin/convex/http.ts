@@ -59,32 +59,23 @@ http.route({
       return twiml("");
     }
 
-    // Always log the message to the feed first — the user sees it pop in live.
-    await ctx.runMutation(api.mutations.createMessageCard, {
-      from,
-      to,
-      body,
-      messageSid,
-      receivedAt: Date.now(),
-    });
-
-    // Generate the agent's reply (per-phone Backboard memory) and send it
-    // back via Twilio. Empty TwiML to ack the inbound — we send the reply
-    // out-of-band so it can include LLM latency without blocking Twilio.
+    // Route + execute MCP-aligned pipeline (feed card, Backboard reply, Twilio).
     try {
-      const { reply } = await ctx.runAction(api.agent.chatReply, {
+      const pipeline = await ctx.runAction(api.agent.handleInboundSms, {
         phone: from,
         body,
+        messageSid,
+        to,
+        execute: true,
       });
-      const send = await ctx.runAction(api.twilioSend.sendSms, {
-        to: from,
-        body: reply,
-      });
-      if (!send.ok) {
-        console.error("Reply send failed:", send.error);
+      if (pipeline.results.some((r) => !r.ok)) {
+        console.error(
+          "handleInboundSms partial failure:",
+          pipeline.results.filter((r) => !r.ok),
+        );
       }
     } catch (err) {
-      console.error("chatReply pipeline error (non-fatal):", err);
+      console.error("handleInboundSms pipeline error (non-fatal):", err);
     }
 
     return twiml("");

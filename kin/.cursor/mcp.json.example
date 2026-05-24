@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kin": {
+      "command": "bun",
+      "args": ["run", "mcp-server/src/index.ts"],
+      "cwd": "kin",
+      "env": {
+        "CONVEX_URL": "https://YOUR_DEPLOYMENT.convex.cloud"
+      }
+    }
+  }
+}

@@ -135,9 +135,6 @@ export default defineSchema({
       v.literal("dismissed"),
     ),
     createdAt: v.number(), // unix ms
-    // Which household member this card is "for" — used to filter the feed
-    // when the active viewer changes. Optional: cards without it are visible
-    // to everyone (e.g. joint-account creep).
     forPersonId: v.optional(v.id("people")),
   })
     .index("by_status", ["status"])
