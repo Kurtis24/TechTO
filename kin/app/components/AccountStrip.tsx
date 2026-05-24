@@ -2,51 +2,43 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatMoney, formatMoneyShort } from "./format";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type Account = {
   _id: string;
+  ownerId: Id<"people">;
   source: "td-alex" | "rbc-dana" | "tangerine-joint" | "inbox";
   institution: string;
-  type: string;
+  type: "chequing" | "savings" | "credit" | "joint" | string;
   balanceCents: bigint;
 };
 
 type Agreement = {
   _id: string;
+  fromId: Id<"people">;
+  toId: Id<"people">;
   status: "open" | "requested" | "settled";
   amountCents: bigint;
   fromName: string;
   toName: string;
+  fromDisplayName?: string;
+  toDisplayName?: string;
+  reason?: string;
 };
 
-type SourceMeta = {
-  who: string;
-  bank: string;
-  type: string;
-  // Tailwind-safe inline color so we don't fight the JIT.
-  dotColor: string;
+type Person = {
+  _id: Id<"people">;
+  name: string;
+  displayName?: string;
+  role?: string;
+  avatarColor?: string;
 };
 
-const SOURCE_META: Record<Account["source"], SourceMeta> = {
-  "td-alex": {
-    who: "Alex",
-    bank: "TD",
-    type: "Chequing",
-    dotColor: "#6dd28e",
-  },
-  "rbc-dana": {
-    who: "Dana",
-    bank: "RBC",
-    type: "Chequing",
-    dotColor: "#7aa9ff",
-  },
-  "tangerine-joint": {
-    who: "Joint",
-    bank: "Tangerine",
-    type: "Savings",
-    dotColor: "#ff8a4a",
-  },
-  inbox: { who: "Inbox", bank: "—", type: "Agreement", dotColor: "#cbbfac" },
+type Props = {
+  accounts: Account[];
+  agreements: Agreement[];
+  people: Person[];
+  viewerId: Id<"people"> | null;
 };
 
 /** Highlights briefly whenever the bigint balance value changes. */
@@ -64,37 +56,93 @@ function useFlashOnChange(value: bigint): boolean {
   return flash;
 }
 
-function AccountTile({ account }: { account: Account }) {
-  const meta = SOURCE_META[account.source];
+/** Friendly type label. */
+function typeLabel(type: string): string {
+  switch (type) {
+    case "chequing":
+      return "Chequing";
+    case "savings":
+      return "Savings";
+    case "joint":
+      return "Joint";
+    case "credit":
+      return "Credit";
+    default:
+      return type;
+  }
+}
+
+type Ownership = "yours" | "joint" | "partner" | "owed";
+
+function ownershipFor(
+  account: Account,
+  viewerId: Id<"people"> | null,
+): Ownership {
+  if (account.type === "joint" || account.type === "savings") return "joint";
+  if (viewerId && account.ownerId === viewerId) return "yours";
+  return "partner";
+}
+
+const OWNERSHIP_LABEL: Record<Ownership, string> = {
+  yours: "Yours",
+  joint: "Shared",
+  partner: "Partner",
+  owed: "Owed to you",
+};
+
+function bankShortName(institution: string): string {
+  // "TD Bank" → "TD", "Tangerine" stays, "RBC" stays
+  const trimmed = institution.trim();
+  if (/td bank/i.test(trimmed)) return "TD";
+  if (/^rbc/i.test(trimmed)) return "RBC";
+  if (/tangerine/i.test(trimmed)) return "Tangerine";
+  return trimmed;
+}
+
+function AccountTile({
+  account,
+  owner,
+  viewerId,
+}: {
+  account: Account;
+  owner: Person | undefined;
+  viewerId: Id<"people"> | null;
+}) {
   const flash = useFlashOnChange(account.balanceCents);
+  const ownership = ownershipFor(account, viewerId);
+  const ownerName = owner?.displayName ?? owner?.name ?? "—";
+  const isJoint = ownership === "joint";
+
+  const dotColor =
+    ownership === "yours"
+      ? "#6dd28e"
+      : ownership === "partner"
+        ? owner?.avatarColor ?? "#7aa9ff"
+        : "#ff8a4a";
 
   return (
-    <div
-      className={`kin-card-tile relative overflow-hidden px-4 py-4 ${
+    <article
+      className={`kin-account-tile kin-account-${ownership} ${
         flash ? "kin-flash" : ""
       }`}
+      aria-label={`${OWNERSHIP_LABEL[ownership]}: ${ownerName}'s ${typeLabel(account.type)} at ${bankShortName(account.institution)}`}
     >
-      {/* Eyebrow: who + bank */}
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-kin-bone-soft">
+      <header className="kin-account-ribbon">
+        <span className="kin-account-ribbon-left">
           <span
-            className="inline-block h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: meta.dotColor }}
+            className="kin-account-dot"
+            style={{ background: dotColor }}
             aria-hidden="true"
           />
-          {meta.who}
+          {OWNERSHIP_LABEL[ownership]}
         </span>
-        <span
-          className="text-[10px] uppercase tracking-[0.18em] text-kin-bone-dim"
-          translate="no"
-        >
-          {meta.bank}
+        <span className="kin-account-bank" translate="no">
+          {bankShortName(account.institution)}
         </span>
-      </div>
+      </header>
 
-      {/* The number — display serif italic. Tabular nums for alignment. */}
       <div
-        className="kin-counter mt-3 text-[28px] leading-none tracking-tight text-kin-bone tabular-nums"
+        className="kin-account-balance"
         style={{
           fontFamily: "var(--font-serif)",
           fontFeatureSettings: '"tnum"',
@@ -103,62 +151,98 @@ function AccountTile({ account }: { account: Account }) {
         {formatMoney(account.balanceCents)}
       </div>
 
-      {/* Type tag */}
-      <div className="mt-2 text-[11px] text-kin-bone-soft">{meta.type}</div>
-    </div>
+      <div className="kin-account-meta">
+        <span className="kin-account-owner">
+          {isJoint ? "Household" : ownerName}
+        </span>
+        <span aria-hidden="true" className="kin-account-meta-sep">
+          ·
+        </span>
+        <span className="kin-account-type">
+          {isJoint ? "Joint savings" : typeLabel(account.type)}
+        </span>
+      </div>
+    </article>
   );
 }
 
-function OwedPill({ agreement }: { agreement: Agreement }) {
+function OwedTile({
+  agreement,
+  viewerId,
+}: {
+  agreement: Agreement;
+  viewerId: Id<"people"> | null;
+}) {
   const flash = useFlashOnChange(agreement.amountCents);
   const isSettled = agreement.status === "settled";
   const isRequested = agreement.status === "requested";
+
+  const viewerIsCreditor = viewerId === agreement.toId;
+  const viewerIsDebtor = viewerId === agreement.fromId;
+
+  const fromDisplay = agreement.fromDisplayName ?? agreement.fromName;
+  const toDisplay = agreement.toDisplayName ?? agreement.toName;
+
+  const ribbonLabel = isSettled
+    ? "Settled"
+    : viewerIsCreditor
+      ? "Owed to you"
+      : viewerIsDebtor
+        ? "You owe"
+        : "Open agreement";
+
+  const ownerLine = isSettled
+    ? `${fromDisplay} paid ${toDisplay}`
+    : viewerIsCreditor
+      ? `From ${fromDisplay}`
+      : viewerIsDebtor
+        ? `To ${toDisplay}`
+        : `${fromDisplay} → ${toDisplay}`;
 
   const statusLabel = isSettled
     ? "Settled"
     : isRequested
       ? "Request sent"
       : "Open";
-
   const statusColor = isSettled
     ? "var(--kin-good)"
     : isRequested
       ? "var(--kin-amber-soft)"
       : "var(--kin-ember-soft)";
 
+  const reason = agreement.reason
+    ? agreement.reason.replace(/^./, (c) => c.toUpperCase())
+    : "Inbox agreement";
+
   return (
-    <div
-      className={`kin-card-tile relative overflow-hidden px-4 py-4 ${
-        flash ? "kin-flash" : ""
-      }`}
+    <article
+      className="kin-account-tile kin-account-owed"
       style={{
         borderColor: isSettled
-          ? "rgba(109, 210, 142, 0.25)"
-          : "rgba(255, 138, 74, 0.22)",
+          ? "rgba(109, 210, 142, 0.30)"
+          : "rgba(255, 138, 74, 0.30)",
         background: isSettled
-          ? "linear-gradient(180deg, rgba(109, 210, 142, 0.06) 0%, rgba(109, 210, 142, 0) 100%), var(--kin-surface)"
-          : "linear-gradient(180deg, rgba(255, 138, 74, 0.07) 0%, rgba(255, 138, 74, 0) 100%), var(--kin-surface)",
+          ? "linear-gradient(180deg, rgba(109, 210, 142, 0.05) 0%, rgba(109, 210, 142, 0) 100%), var(--kin-surface)"
+          : "linear-gradient(180deg, rgba(255, 138, 74, 0.06) 0%, rgba(255, 138, 74, 0) 100%), var(--kin-surface)",
       }}
+      aria-label={`${ribbonLabel}: ${ownerLine}, ${statusLabel}`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-kin-bone-soft">
+      <header className="kin-account-ribbon">
+        <span className="kin-account-ribbon-left">
           <span
-            className="inline-block h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: statusColor }}
+            className="kin-account-dot"
+            style={{ background: statusColor }}
             aria-hidden="true"
           />
-          Inbox
+          {ribbonLabel}
         </span>
-        <span
-          className="text-[10px] uppercase tracking-[0.18em]"
-          style={{ color: statusColor }}
-        >
+        <span className="kin-account-bank" style={{ color: statusColor }}>
           {statusLabel}
         </span>
-      </div>
+      </header>
 
       <div
-        className="mt-3 text-[28px] leading-none tracking-tight text-kin-bone tabular-nums"
+        className={`kin-account-balance ${flash ? "kin-flash" : ""}`}
         style={{
           fontFamily: "var(--font-serif)",
           fontFeatureSettings: '"tnum"',
@@ -167,37 +251,54 @@ function OwedPill({ agreement }: { agreement: Agreement }) {
         {formatMoneyShort(agreement.amountCents)}
       </div>
 
-      <div className="mt-2 text-[11px] text-kin-bone-soft">
-        {isSettled
-          ? `${agreement.fromName} paid ${agreement.toName}`
-          : `${agreement.fromName} owes ${agreement.toName}`}
+      <div className="kin-account-meta">
+        <span className="kin-account-owner">{ownerLine}</span>
+        <span aria-hidden="true" className="kin-account-meta-sep">
+          ·
+        </span>
+        <span className="kin-account-type">{reason}</span>
       </div>
-    </div>
+    </article>
   );
 }
 
-export function AccountStrip({
-  accounts,
-  agreements,
-}: {
-  accounts: Account[];
-  agreements: Agreement[];
-}) {
-  const alex = accounts.find((a) => a.source === "td-alex");
-  const dana = accounts.find((a) => a.source === "rbc-dana");
-  const joint = accounts.find((a) => a.source === "tangerine-joint");
-  const ag =
-    agreements.find(
-      (a) =>
-        a.toName === "Alex" && (a.status === "open" || a.status === "requested"),
-    ) ?? agreements.find((a) => a.toName === "Alex");
+export function AccountStrip({ accounts, agreements, people, viewerId }: Props) {
+  const peopleById = new Map(people.map((p) => [p._id, p]));
+
+  // Sort accounts: viewer's own first, then joint/savings, then partner's.
+  const ownership = (a: Account): number => {
+    if (a.type === "joint" || a.type === "savings") return 1;
+    if (viewerId && a.ownerId === viewerId) return 0;
+    return 2;
+  };
+  const sortedAccounts = [...accounts].sort((a, b) => ownership(a) - ownership(b));
+
+  // Pick the most relevant agreement to surface as a tile (open ones first).
+  const activeAgreement =
+    agreements.find((a) => a.status === "open" || a.status === "requested") ??
+    agreements[0];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-      {alex && <AccountTile account={alex} />}
-      {joint && <AccountTile account={joint} />}
-      {dana && <AccountTile account={dana} />}
-      {ag && <OwedPill agreement={ag} />}
+    <div>
+      <div className="kin-account-strip-caption">
+        <span className="kin-account-strip-eyebrow">Your household</span>
+        <span className="kin-account-strip-hint">
+          Cross-account visibility — Kin sees what your banks can&rsquo;t
+        </span>
+      </div>
+      <div className="kin-account-strip">
+        {sortedAccounts.map((a) => (
+          <AccountTile
+            key={a._id}
+            account={a}
+            owner={peopleById.get(a.ownerId)}
+            viewerId={viewerId}
+          />
+        ))}
+        {activeAgreement && (
+          <OwedTile agreement={activeAgreement} viewerId={viewerId} />
+        )}
+      </div>
     </div>
   );
 }

@@ -1,0 +1,14 @@
+---
+pid: 32283
+cwd: /Users/kurtis/Documents/TechTO/TechTO
+command: cd /Users/kurtis/Documents/TechTO/TechTO/kin && npx next dev 2>&1 | head -30
+---
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.2.165:3000
+- Environments: .env
+✓ Ready in 302ms
+
+  Reload env: .env
+
+--- exit_code: 0 ---

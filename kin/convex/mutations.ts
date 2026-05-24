@@ -361,4 +361,20 @@ export const updatePhoneAssistantThread = mutation({
   },
 });
 
+// ─── setCurrentViewer ────────────────────────────────────────────────────────
+// Switch the active household member. Powers the demo's "see what Alex sees,
+// switch to Dana" beat. If no householdState row exists yet, create one.
+export const setCurrentViewer = mutation({
+  args: { personId: v.id("people") },
+  handler: async (ctx, { personId }) => {
+    const existing = await ctx.db.query("householdState").first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { currentViewerId: personId });
+    } else {
+      await ctx.db.insert("householdState", { currentViewerId: personId });
+    }
+    return { currentViewerId: personId };
+  },
+});
+
 export type { Id };
