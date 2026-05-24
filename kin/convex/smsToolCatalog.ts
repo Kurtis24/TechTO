@@ -51,6 +51,26 @@ export const SMS_ROUTABLE_TOOLS: SmsCatalogTool[] = [
     argsHint: "{}",
   },
   {
+    name: "convex_create_goal",
+    description: "Create a new savings goal or budget (name, targetCents, deadline).",
+    argsHint: '{ "name": "Vacation", "targetCents": 200000, "deadline": <unix ms> }',
+  },
+  {
+    name: "convex_update_goal",
+    description: "Update an existing goal's name, target amount, deadline, or saved amount.",
+    argsHint: '{ "goalId": "<id>", "name": "...", "targetCents": 200000 }',
+  },
+  {
+    name: "convex_delete_goal",
+    description: "Delete a savings goal by its ID.",
+    argsHint: '{ "goalId": "<id>" }',
+  },
+  {
+    name: "convex_add_savings_to_goal",
+    description: "Record money saved toward a goal (increments savedCents).",
+    argsHint: '{ "goalId": "<id>", "amountCents": 20000 }',
+  },
+  {
     name: "convex_send_briefing",
     description:
       "Send the full morning briefing SMS (only if user explicitly asks for briefing/morning summary).",

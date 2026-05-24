@@ -377,4 +377,69 @@ export const setCurrentViewer = mutation({
   },
 });
 
+// ─── Goal / Budget CRUD ──────────────────────────────────────────────────────
+
+export const createGoal = mutation({
+  args: {
+    name: v.string(),
+    targetCents: v.int64(),
+    deadline: v.number(), // unix ms
+    savedCents: v.optional(v.int64()),
+  },
+  handler: async (ctx, { name, targetCents, deadline, savedCents }) => {
+    return await ctx.db.insert("goals", {
+      name,
+      targetCents,
+      deadline,
+      savedCents: savedCents ?? BigInt(0),
+    });
+  },
+});
+
+export const updateGoal = mutation({
+  args: {
+    goalId: v.id("goals"),
+    name: v.optional(v.string()),
+    targetCents: v.optional(v.int64()),
+    deadline: v.optional(v.number()),
+    savedCents: v.optional(v.int64()),
+  },
+  handler: async (ctx, { goalId, name, targetCents, deadline, savedCents }) => {
+    const goal = await ctx.db.get(goalId);
+    if (!goal) throw new Error("Goal not found");
+    const patch: Partial<{ name: string; targetCents: bigint; deadline: number; savedCents: bigint }> = {};
+    if (name !== undefined) patch.name = name;
+    if (targetCents !== undefined) patch.targetCents = targetCents;
+    if (deadline !== undefined) patch.deadline = deadline;
+    if (savedCents !== undefined) patch.savedCents = savedCents;
+    await ctx.db.patch(goalId, patch);
+    return { updated: true };
+  },
+});
+
+export const deleteGoal = mutation({
+  args: { goalId: v.id("goals") },
+  handler: async (ctx, { goalId }) => {
+    const goal = await ctx.db.get(goalId);
+    if (!goal) throw new Error("Goal not found");
+    await ctx.db.delete(goalId);
+    return { deleted: true };
+  },
+});
+
+// Add an amount to savedCents (e.g., "I put $200 toward vacation")
+export const addSavingsToGoal = mutation({
+  args: {
+    goalId: v.id("goals"),
+    amountCents: v.int64(),
+  },
+  handler: async (ctx, { goalId, amountCents }) => {
+    const goal = await ctx.db.get(goalId);
+    if (!goal) throw new Error("Goal not found");
+    const newSaved = goal.savedCents + amountCents;
+    await ctx.db.patch(goalId, { savedCents: newSaved });
+    return { savedCents: Number(newSaved), targetCents: Number(goal.targetCents) };
+  },
+});
+
 export type { Id };
