@@ -560,7 +560,7 @@ export const runDetection = mutation({
           });
         }
 
-        // Write the card
+        // Write the card — scoped to the affected account's owner
         await ctx.db.insert("cards", {
           type: "overdraft",
           severity: "critical",
@@ -581,9 +581,13 @@ export const runDetection = mutation({
           actions,
           status: "open",
           createdAt: now,
+          forPersonId: account.ownerId,
         });
         results.cardsWritten++;
       }
+
+      // Cards from this account belong to the account's owner
+      const cardOwnerId = account.ownerId;
 
       // ── 3. Duplicate detection ───────────────────────────────────────
       const duplicates = detectDuplicates(transactions);
@@ -617,6 +621,7 @@ export const runDetection = mutation({
           ],
           status: "open",
           createdAt: now,
+          forPersonId: cardOwnerId,
         });
         results.cardsWritten++;
       }
@@ -650,6 +655,7 @@ export const runDetection = mutation({
           ],
           status: "open",
           createdAt: now,
+          forPersonId: cardOwnerId,
         });
         results.cardsWritten++;
       }
@@ -657,6 +663,12 @@ export const runDetection = mutation({
 
     // ── 5. Subscription creep (across all subscriptions) ───────────────
     const subscriptions = await ctx.db.query("subscriptions").collect();
+    // Map subscription's account → owner so creep cards land in the right feed.
+    const subscriptionOwners = new Map<string, string>();
+    for (const sub of subscriptions) {
+      const acct = await ctx.db.get(sub.accountId);
+      if (acct) subscriptionOwners.set(sub.merchant, acct.ownerId);
+    }
     const creepHits = detectCreep(subscriptions);
     for (const hit of creepHits) {
       results.creeps++;
@@ -681,6 +693,9 @@ export const runDetection = mutation({
         ],
         status: "open",
         createdAt: now,
+        forPersonId: subscriptionOwners.get(hit.merchant) as
+          | import("./_generated/dataModel").Id<"people">
+          | undefined,
       });
       results.cardsWritten++;
     }
@@ -780,6 +795,7 @@ export const runDetection = mutation({
           actions,
           status: "open",
           createdAt: now,
+          forPersonId: alexChq.ownerId,
         });
         results.overdrafts++;
         results.cardsWritten++;

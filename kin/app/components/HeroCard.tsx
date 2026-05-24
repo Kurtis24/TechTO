@@ -5,6 +5,9 @@ import { useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { CallModal, type CallState } from "./CallModal";
+import { useToast, type ToastVariant } from "./Toast";
+
+type CardAction = { id: string; label: string; kind: string; params: unknown };
 
 type CardDoc = {
   _id: Id<"cards">;
@@ -13,13 +16,53 @@ type CardDoc = {
   title: string;
   body: string;
   status: "open" | "resolved" | "dismissed";
-  actions: { id: string; label: string; kind: string; params: unknown }[];
+  actions: CardAction[];
 };
+
+/** Pull "$800" or "$500" out of an action's label for confirmation copy. */
+function amountFromLabel(label: string): string | null {
+  const m = label.match(/\$[\d,]+(?:\.\d{2})?/);
+  return m ? m[0] : null;
+}
+
+function heroToast(
+  action: CardAction,
+): { variant: ToastVariant; title: string; body?: string } {
+  const amount = amountFromLabel(action.label);
+  switch (action.kind) {
+    case "move_money":
+      return {
+        variant: "success",
+        title: amount
+          ? `Moved ${amount} → TD chequing`
+          : "Funds moved to TD chequing",
+        body: "Rent is covered. Trip goal is untouched.",
+      };
+    case "send_etransfer":
+    case "send_etransfer_request":
+      return {
+        variant: "success",
+        title: amount
+          ? `e-Transfer request sent to Dana for ${amount}`
+          : "e-Transfer request sent to Dana",
+        body: "She'll get the ping in her RBC inbox.",
+      };
+    case "both":
+      return {
+        variant: "success",
+        title: "Done — request sent + funds moved",
+        body: "Rent covered Saturday. Kin will confirm when Dana pays.",
+      };
+    default:
+      return { variant: "success", title: action.label };
+  }
+}
 
 export function HeroCard({ card }: { card: CardDoc }) {
   const runAgent = useAction(api.agent.runAgent);
   const executeAction = useAction(api.agent.executeAction);
   const placeCall = useAction(api.agent.placeCall);
+  const { push } = useToast();
 
   const [reasoning, setReasoning] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -29,13 +72,27 @@ export function HeroCard({ card }: { card: CardDoc }) {
     setReasoning(true);
     try {
       await runAgent({ cardId: card._id });
+      push({
+        variant: "info",
+        title: "Kin reasoned across your accounts",
+        body: "Pulled balances, agreements, and the trip goal. Proposed actions below.",
+      });
+    } catch (err) {
+      push({
+        variant: "error",
+        title: "Kin couldn't reason about this",
+        body:
+          err instanceof Error
+            ? err.message
+            : "Likely missing BACKBOARD_API_KEY in Convex env.",
+      });
     } finally {
       setReasoning(false);
     }
   };
 
-  const handleAction = async (actionId: string, kind: string) => {
-    if (kind === "call_dana") {
+  const handleAction = async (action: CardAction) => {
+    if (action.kind === "call_dana") {
       setCall({ status: "dialing" });
       setTimeout(() => setCall({ status: "ringing" }), 600);
       try {
@@ -47,18 +104,38 @@ export function HeroCard({ card }: { card: CardDoc }) {
           agentLine: res.agentLine,
           danaLine: res.danaLine,
         });
+        push({
+          variant: "success",
+          title: "Call complete — Dana confirmed",
+          body: "Agreement settling. Funds on the way to your TD chequing.",
+        });
       } catch (err) {
         console.error("placeCall failed", err);
         setCall(null);
-        alert(
-          "Call failed — check ELEVENLABS_API_KEY in the Convex dashboard env.",
-        );
+        push({
+          variant: "error",
+          title: "Call failed",
+          body:
+            err instanceof Error
+              ? err.message
+              : "Check ELEVENLABS_API_KEY in the Convex dashboard env.",
+        });
       }
       return;
     }
-    setBusy(actionId);
+    setBusy(action.id);
     try {
-      await executeAction({ cardId: card._id, actionId });
+      await executeAction({ cardId: card._id, actionId: action.id });
+      push(heroToast(action));
+    } catch (err) {
+      push({
+        variant: "error",
+        title: "Couldn't complete that action",
+        body:
+          err instanceof Error
+            ? err.message
+            : "The mutation failed — check Convex logs.",
+      });
     } finally {
       setBusy(null);
     }
@@ -185,7 +262,7 @@ export function HeroCard({ card }: { card: CardDoc }) {
                     <button
                       key={a.id}
                       type="button"
-                      onClick={() => handleAction(a.id, a.kind)}
+                      onClick={() => handleAction(a)}
                       disabled={busy !== null}
                       className={`kin-btn ${
                         primary ? "kin-btn-primary" : "kin-btn-ghost"
