@@ -13,12 +13,11 @@
 
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DAY = 86_400_000;
-const WEEK = 7 * DAY;
 
 // ─── Pure math helpers (exported for testing) ────────────────────────────────
 
@@ -445,6 +444,21 @@ export const runDetection = mutation({
       cardsWritten: 0,
     };
 
+    // Idempotent: wipe existing engine-written cards so re-running the
+    // detector doesn't pile up duplicates. Leaves `info` cards (stored
+    // decisions) alone.
+    const existing = await ctx.db.query("cards").collect();
+    for (const c of existing) {
+      if (
+        c.type === "overdraft" ||
+        c.type === "duplicate" ||
+        c.type === "creep" ||
+        c.type === "outlier"
+      ) {
+        await ctx.db.delete(c._id);
+      }
+    }
+
     // Get target accounts
     let accounts: Doc<"accounts">[];
     if (accountId) {
@@ -711,5 +725,14 @@ export const getForecast = query({
 
     const baseline = computeBaseline(account, transactions);
     return forecastOverdraft(account.balanceCents, baseline);
+  },
+});
+
+// ─── dismissCard ─────────────────────────────────────────────────────────────
+// Used by the agent's executeAction to silence byproduct cards (dup/creep/outlier).
+export const dismissCard = mutation({
+  args: { cardId: v.id("cards") },
+  handler: async (ctx, { cardId }) => {
+    await ctx.db.patch(cardId, { status: "dismissed" });
   },
 });

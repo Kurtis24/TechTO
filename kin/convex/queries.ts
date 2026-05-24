@@ -96,6 +96,27 @@ export const getGoals = query({
   },
 });
 
+// ─── getCards ────────────────────────────────────────────────────────────────
+export const getCards = query({
+  args: {
+    includeResolved: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { includeResolved = false }) => {
+    const cards = await ctx.db.query("cards").collect();
+    const filtered = includeResolved
+      ? cards
+      : cards.filter((c) => c.status === "open");
+    // Sort: critical > warn > info, then newest first.
+    const sevRank = { critical: 0, warn: 1, info: 2 } as const;
+    filtered.sort((a, b) => {
+      const r = sevRank[a.severity] - sevRank[b.severity];
+      if (r !== 0) return r;
+      return b.createdAt - a.createdAt;
+    });
+    return filtered;
+  },
+});
+
 // ─── getSubscriptions ────────────────────────────────────────────────────────
 export const getSubscriptions = query({
   args: {
