@@ -8,6 +8,7 @@ import { HeroCard } from "./components/HeroCard";
 import { ByproductCard } from "./components/ByproductCard";
 import { FocusBrief } from "./components/FocusBrief";
 import { HandledRail } from "./components/HandledRail";
+import { HouseholdSnapshot } from "./components/HouseholdSnapshot";
 import { ViewerCard } from "./components/ViewerCard";
 
 export default function Home() {
@@ -87,9 +88,17 @@ export default function Home() {
     [people, currentViewer],
   );
 
+  const hasAccounts = (accounts?.length ?? 0) > 0;
+  const snapshotProps = {
+    accounts: allAccounts ?? [],
+    agreements: agreements ?? [],
+    people: people ?? [],
+    viewerId: currentViewer?._id ?? null,
+  };
+
   return (
     <main className="relative min-h-screen">
-      <div className="mx-auto w-full max-w-3xl px-6 pt-10 pb-20 sm:pt-14">
+      <div className="mx-auto w-full max-w-3xl xl:max-w-[1200px] px-6 pt-10 pb-20 sm:pt-14">
         {/* ── Brand header ─────────────────────────────────────────────
             Wordmark on the left; the interactive viewer card on the right.
             The viewer card is the door to the household panel — it tells
@@ -170,148 +179,181 @@ export default function Home() {
 
         <div className="kin-hr mt-5" aria-hidden="true" />
 
-        {/* ── Account strip ───────────────────────────────────────────── */}
-        <section
-          className="kin-rise mt-7"
-          style={{ animationDelay: "120ms" }}
-          aria-label="Household accounts"
-        >
-          {loading ? (
-            <div className="kin-card p-6 text-sm text-kin-bone-mute">
-              Loading household…
-            </div>
-          ) : accounts && accounts.length === 0 ? (
-            <div
-              className="kin-card p-6"
-              style={{
-                borderColor: "rgba(249, 168, 37, 0.35)",
-                background:
-                  "linear-gradient(180deg, rgba(249, 168, 37, 0.06) 0%, rgba(249, 168, 37, 0) 100%), var(--kin-surface)",
-              }}
+        {/* ── Dashboard grid ───────────────────────────────────────────
+            Single column below xl; feed + sticky rail above. The rail
+            holds the household snapshot (donut) so wide screens stop
+            wasting their side space. */}
+        <div className="kin-shell-grid mt-7">
+          <div className="min-w-0">
+            {/* ── Account strip ─────────────────────────────────────── */}
+            <section
+              className="kin-rise"
+              style={{ animationDelay: "120ms" }}
+              aria-label="Household accounts"
             >
-              <h2
-                className="text-xl text-kin-bone"
-                style={{ fontFamily: "var(--font-serif)" }}
-              >
-                No data yet
-              </h2>
-              <p className="mt-1 text-sm text-kin-bone-mute">
-                Open the household panel and tap{" "}
-                <span className="text-kin-amber-soft">Reset demo</span> to seed
-                the household and run the engine.
-              </p>
-            </div>
-          ) : (
-            <AccountStrip
-              accounts={accounts ?? []}
-              agreements={agreements ?? []}
-              people={people ?? []}
-              viewerId={currentViewer?._id ?? null}
-            />
-          )}
-        </section>
-
-        {/* ── Focus brief ────────────────────────────────────────────── */}
-        {!loading && (accounts?.length ?? 0) > 0 && (
-          <section className="mt-7" aria-label="Right now">
-            <FocusBrief
-              hero={heroToShow ?? null}
-              byproductCount={byproducts.length}
-              viewer={currentViewer ?? null}
-              partner={partner}
-            />
-          </section>
-        )}
-
-        {/* ── The feed ──────────────────────────────────────────────── */}
-        <section
-          className="kin-rise mt-8 space-y-5"
-          style={{ animationDelay: "180ms" }}
-          aria-label="Kin feed"
-        >
-          <div className="kin-section-eyebrow justify-between">
-            <span className="kin-section-eyebrow-label">The Feed</span>
-            {heroToShow ? (
-              heroToShow.status === "resolved" ? (
-                <span className="text-[11px] uppercase tracking-[0.18em] text-kin-good">
-                  Handled
-                </span>
+              {loading ? (
+                <div className="kin-card p-6 text-sm text-kin-bone-mute">
+                  Loading household…
+                </div>
+              ) : accounts && accounts.length === 0 ? (
+                <div
+                  className="kin-card p-6"
+                  style={{
+                    borderColor: "rgba(249, 168, 37, 0.35)",
+                    background:
+                      "linear-gradient(180deg, rgba(249, 168, 37, 0.06) 0%, rgba(249, 168, 37, 0) 100%), var(--kin-surface)",
+                  }}
+                >
+                  <h2
+                    className="text-xl text-kin-bone"
+                    style={{ fontFamily: "var(--font-serif)" }}
+                  >
+                    No data yet
+                  </h2>
+                  <p className="mt-1 text-sm text-kin-bone-mute">
+                    Open the household panel and tap{" "}
+                    <span className="text-kin-amber-soft">Reset demo</span> to seed
+                    the household and run the engine.
+                  </p>
+                </div>
               ) : (
-                <span className="text-[11px] uppercase tracking-[0.18em] text-kin-ember-soft">
-                  1 tap will land it
-                </span>
-              )
-            ) : null}
+                <AccountStrip
+                  accounts={accounts ?? []}
+                  agreements={agreements ?? []}
+                  people={people ?? []}
+                  viewerId={currentViewer?._id ?? null}
+                />
+              )}
+            </section>
+
+            {/* Inline household snapshot — only renders below xl, where
+                the right rail isn't available. */}
+            {!loading && hasAccounts && (
+              <div
+                className="kin-rise mt-5 xl:hidden"
+                style={{ animationDelay: "150ms" }}
+              >
+                <HouseholdSnapshot {...snapshotProps} />
+              </div>
+            )}
+
+            {/* ── Focus brief — only shown when there's no open hero card.
+                When the hero card is visible it narrates itself; the brief
+                would just double up and push it further down the page. */}
+            {!loading && hasAccounts && !hero && (
+              <section className="mt-7" aria-label="Right now">
+                <FocusBrief
+                  hero={heroToShow ?? null}
+                  byproductCount={byproducts.length}
+                  viewer={currentViewer ?? null}
+                  partner={partner}
+                />
+              </section>
+            )}
+
+            {/* ── The feed ──────────────────────────────────────────── */}
+            <section
+              className="kin-rise mt-8 space-y-5"
+              style={{ animationDelay: "180ms" }}
+              aria-label="Kin feed"
+            >
+              <div className="kin-section-eyebrow justify-between">
+                <span className="kin-section-eyebrow-label">The Feed</span>
+                {heroToShow ? (
+                  heroToShow.status === "resolved" ? (
+                    <span className="text-[11px] uppercase tracking-[0.18em] text-kin-good">
+                      Handled
+                    </span>
+                  ) : (
+                    <span className="text-[11px] uppercase tracking-[0.18em] text-kin-ember-soft">
+                      1 tap will land it
+                    </span>
+                  )
+                ) : null}
+              </div>
+
+              {heroToShow && <HeroCard card={heroToShow} />}
+
+              {byproducts.length > 0 && (
+                <div className="space-y-2">
+                  <div className="kin-section-eyebrow">
+                    <span className="kin-section-eyebrow-label">Worth a look</span>
+                    <span className="kin-section-eyebrow-hint">
+                      {byproducts.length} small flag
+                      {byproducts.length === 1 ? "" : "s"} — none time-sensitive
+                    </span>
+                  </div>
+                  <div className="kin-card overflow-hidden">
+                    {byproducts.map((c, i) => (
+                      <div
+                        key={c._id}
+                        className={
+                          i > 0 ? "border-t border-[var(--kin-line)]" : undefined
+                        }
+                      >
+                        <ByproductCard card={c} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!loading && !heroToShow && byproducts.length === 0 && (
+                <div className="kin-card grid place-items-center px-6 py-14 text-center">
+                  <span
+                    className="kin-eye mb-4"
+                    style={{ width: 18, height: 18 }}
+                    aria-hidden="true"
+                  />
+                  <p
+                    className="text-2xl text-kin-bone"
+                    style={{ fontFamily: "var(--font-serif)" }}
+                  >
+                    <span className="italic">All quiet.</span>
+                  </p>
+                  <p className="mt-1 text-sm text-kin-bone-mute">
+                    Nothing here for{" "}
+                    {currentViewer?.displayName ?? currentViewer?.name ?? "you"}{" "}
+                    right now. Kin is still watching.
+                  </p>
+                </div>
+              )}
+            </section>
+
+            {/* ── Handled today ──────────────────────────────────────── */}
+            {!loading && resolvedCards && <HandledRail cards={resolvedCards} />}
+
+            {/* ── Footer ─────────────────────────────────────────────── */}
+            {!loading && accounts && accounts.length > 0 && (
+              <footer className="mt-16">
+                <div className="kin-hr mb-6" aria-hidden="true" />
+                <p className="text-center text-[11px] uppercase tracking-[0.22em] text-kin-bone-dim">
+                  <span className="tabular-nums">
+                    {silentCount.toLocaleString("en-CA")}
+                  </span>{" "}
+                  transactions silent ·{" "}
+                  <span className="text-kin-bone-soft">
+                    {attentionCount} surfaced
+                  </span>{" "}
+                  · across{" "}
+                  <span className="tabular-nums">{accounts.length}</span> accounts
+                </p>
+              </footer>
+            )}
           </div>
 
-          {heroToShow && <HeroCard card={heroToShow} />}
-
-          {byproducts.length > 0 && (
-            <div className="space-y-2">
-              <div className="kin-section-eyebrow">
-                <span className="kin-section-eyebrow-label">Worth a look</span>
-                <span className="kin-section-eyebrow-hint">
-                  {byproducts.length} small flag
-                  {byproducts.length === 1 ? "" : "s"} — none time-sensitive
-                </span>
-              </div>
-              <div className="kin-card overflow-hidden">
-                {byproducts.map((c, i) => (
-                  <div
-                    key={c._id}
-                    className={
-                      i > 0 ? "border-t border-[var(--kin-line)]" : undefined
-                    }
-                  >
-                    <ByproductCard card={c} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {!loading && !heroToShow && byproducts.length === 0 && (
-            <div className="kin-card grid place-items-center px-6 py-14 text-center">
-              <span
-                className="kin-eye mb-4"
-                style={{ width: 18, height: 18 }}
-                aria-hidden="true"
-              />
-              <p
-                className="text-2xl text-kin-bone"
-                style={{ fontFamily: "var(--font-serif)" }}
-              >
-                <span className="italic">All quiet.</span>
-              </p>
-              <p className="mt-1 text-sm text-kin-bone-mute">
-                Nothing here for{" "}
-                {currentViewer?.displayName ?? currentViewer?.name ?? "you"}{" "}
-                right now. Kin is still watching.
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* ── Handled today ────────────────────────────────────────── */}
-        {!loading && resolvedCards && <HandledRail cards={resolvedCards} />}
-
-        {/* ── Footer ─────────────────────────────────────────────────── */}
-        {!loading && accounts && accounts.length > 0 && (
-          <footer className="mt-16">
-            <div className="kin-hr mb-6" aria-hidden="true" />
-            <p className="text-center text-[11px] uppercase tracking-[0.22em] text-kin-bone-dim">
-              <span className="tabular-nums">
-                {silentCount.toLocaleString("en-CA")}
-              </span>{" "}
-              transactions silent ·{" "}
-              <span className="text-kin-bone-soft">
-                {attentionCount} surfaced
-              </span>{" "}
-              · across{" "}
-              <span className="tabular-nums">{accounts.length}</span> accounts
-            </p>
-          </footer>
-        )}
+          {/* ── Right rail (xl+ only) ─────────────────────────────────
+              Sticky household snapshot so the donut stays visible while
+              the feed scrolls. Hidden on smaller screens — the inline
+              copy above takes over. */}
+          <aside
+            className="kin-rail kin-rail-sticky hidden xl:flex kin-rise"
+            style={{ animationDelay: "160ms" }}
+            aria-label="Household at a glance"
+          >
+            {!loading && hasAccounts && <HouseholdSnapshot {...snapshotProps} />}
+          </aside>
+        </div>
       </div>
     </main>
   );

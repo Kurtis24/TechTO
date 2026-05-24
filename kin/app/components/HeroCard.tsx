@@ -253,32 +253,44 @@ export function HeroCard({ card }: { card: CardDoc }) {
               <div className="text-[10px] uppercase tracking-[0.22em] text-kin-bone-dim">
                 Proposed actions
               </div>
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {card.actions.map((a) => {
+              <div className="mt-3 flex flex-col gap-2">
+                {/* Ghost (individual) options in a row, primary actions full-width below */}
+                <div className="flex flex-wrap gap-2">
+                  {card.actions.filter(a => a.kind !== "call_dana" && a.kind !== "both").map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => handleAction(a)}
+                      disabled={busy !== null}
+                      className="kin-btn kin-btn-ghost flex-1"
+                      aria-label={a.label}
+                    >
+                      {busy === a.id ? (
+                        <><Spinner />Working…</>
+                      ) : (
+                        <><ArrowIcon />{a.label}</>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                {card.actions.filter(a => a.kind === "both" || a.kind === "call_dana").map((a) => {
                   const isCall = a.kind === "call_dana";
                   const isBoth = a.kind === "both";
-                  const primary = isCall || isBoth;
                   return (
                     <button
                       key={a.id}
                       type="button"
                       onClick={() => handleAction(a)}
                       disabled={busy !== null}
-                      className={`kin-btn ${
-                        primary ? "kin-btn-primary" : "kin-btn-ghost"
-                      }`}
+                      className="kin-btn kin-btn-primary w-full"
                       aria-label={a.label}
                     >
                       {busy === a.id ? (
-                        <>
-                          <Spinner />
-                          Working…
-                        </>
+                        <><Spinner />Working…</>
                       ) : (
                         <>
                           {isCall && <PhoneIcon />}
                           {isBoth && <SparkIcon />}
-                          {!isCall && !isBoth && <ArrowIcon />}
                           {a.label}
                         </>
                       )}

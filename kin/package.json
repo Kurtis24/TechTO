@@ -10,6 +10,7 @@
     "mcp": "bun run mcp-server/src/index.ts"
   },
   "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.1.15",
     "backboard-sdk": "^1.5.15",
     "convex": "^1.39.1",
     "next": "^16.2.6",
