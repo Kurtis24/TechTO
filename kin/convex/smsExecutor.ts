@@ -3,12 +3,14 @@
  *
  * Performance shape:
  *   - `Preloaded` is the snapshot `handleInboundSms` fetches once at the top of
- *     the request. The executor uses it to (a) skip the action cold-start when
- *     dispatching `convex_chat_reply`, and (b) lets `handleInboundSms` filter
- *     redundant `convex_get_*` steps from the plan entirely.
- *   - `PRELOADED_TOOLS` enumerates the tool names whose data is in `Preloaded`.
- *   - `TERMINAL_TOOLS` enumerates the tools that mutate / send / reply — these
- *     must run sequentially after the parallel context phase.
+ *     the request. When `state.preloaded` is set, this executor serves the
+ *     `convex_get_accounts/agreements/cards/subscribers` cases from cache
+ *     instead of re-querying Convex.
+ *
+ * The phase-classification sets (`PRELOADED_TOOLS`, `TERMINAL_TOOLS`) live in
+ * `agent.ts` (where the orchestrator uses them). They intentionally do NOT
+ * cross the Node ↔ Convex-isolate bundler boundary as runtime values — only
+ * the `executeSmsPlanStep` function does, which marshals cleanly.
  */
 
 import { api } from "./_generated/api";
@@ -51,22 +53,6 @@ export type ExecuteState = {
   preloaded?: Preloaded;
 };
 
-/** Tools whose data `handleInboundSms` already fetched in parallel. */
-export const PRELOADED_TOOLS = new Set<string>([
-  "convex_get_accounts",
-  "convex_get_agreements",
-  "convex_get_cards",
-  "convex_get_subscribers",
-]);
-
-/** Tools that mutate / send / reply. These must run after the context phase. */
-export const TERMINAL_TOOLS = new Set<string>([
-  "convex_create_message_card",
-  "convex_chat_reply",
-  "convex_send_briefing",
-  "convex_send_sms",
-]);
-
 export async function executeSmsPlanStep(
   ctx: ActionCtx,
   step: SmsPlanStep,
@@ -76,7 +62,7 @@ export async function executeSmsPlanStep(
 
   // If `handleInboundSms` already loaded this data into `state.preloaded`,
   // serve it from cache instead of re-querying Convex.
-  if (state.preloaded && PRELOADED_TOOLS.has(tool)) {
+  if (state.preloaded) {
     switch (tool) {
       case "convex_get_accounts":
         return ok(tool, state.preloaded.accounts);

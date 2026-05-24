@@ -1190,11 +1190,346 @@ main, header, footer {
   .kin-fade-in,
   .kin-rise,
   .kin-toast,
-  .kin-action-done {
+  .kin-action-done,
+  .kin-word,
+  .kin-float,
+  .kin-shimmer::after,
+  .kin-step-trace::before,
+  .kin-eye-aura::before,
+  .kin-eye-aura::after {
     animation: none !important;
   }
+  .kin-word { opacity: 1 !important; transform: none !important; filter: none !important; letter-spacing: inherit !important; }
+  .kin-reveal { opacity: 1 !important; transform: none !important; filter: none !important; }
+  .kin-reveal-trace::after { display: none !important; }
+  .kin-page-in { animation: none !important; }
   .kin-card-leaving { transition: none !important; }
   * { transition-duration: 0ms !important; }
+}
+
+/* ───────────────────────────────────────────────────────────────
+   Landing page only — feature tiles + how-it-works steps.
+   Kept here so they share tokens with the product feed and never
+   drift out of design language.
+   ─────────────────────────────────────────────────────────────── */
+.kin-feature {
+  position: relative;
+  padding: 1.4rem 1.4rem 1.5rem;
+  border-radius: 16px;
+  border: 1px solid var(--kin-line);
+  background:
+    linear-gradient(180deg, rgba(255, 222, 188, 0.03) 0%, rgba(255, 222, 188, 0) 100%),
+    var(--kin-surface);
+  box-shadow:
+    0 1px 0 rgba(255, 222, 188, 0.04) inset,
+    0 18px 36px -24px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  transition: border-color 220ms ease, transform 220ms ease, box-shadow 220ms ease;
+}
+.kin-feature:hover {
+  border-color: rgba(255, 107, 31, 0.28);
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 rgba(255, 222, 188, 0.05) inset,
+    0 30px 60px -30px rgba(255, 107, 31, 0.25),
+    0 18px 36px -24px rgba(0, 0, 0, 0.55);
+}
+.kin-feature-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 107, 31, 0.28);
+  background:
+    radial-gradient(80% 80% at 30% 25%, rgba(255, 213, 106, 0.18) 0%, rgba(255, 107, 31, 0.06) 60%, rgba(255, 107, 31, 0) 100%),
+    rgba(255, 107, 31, 0.04);
+  color: var(--kin-ember-soft);
+  margin-bottom: 0.3rem;
+  box-shadow:
+    0 0 0 1px rgba(255, 107, 31, 0.06) inset,
+    0 8px 18px -12px rgba(255, 107, 31, 0.35);
+}
+.kin-feature-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--kin-ember-soft);
+}
+.kin-feature-title {
+  font-size: 1.35rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--kin-bone);
+  text-wrap: pretty;
+}
+.kin-feature-body {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--kin-bone-mute);
+  text-wrap: pretty;
+}
+
+/* Numbered step in the "how it works" loop */
+.kin-step {
+  position: relative;
+  padding: 1.25rem 1.25rem 1.4rem;
+  border-radius: 14px;
+  border: 1px solid var(--kin-line);
+  background:
+    linear-gradient(180deg, rgba(255, 222, 188, 0.025) 0%, rgba(255, 222, 188, 0) 100%),
+    var(--kin-surface);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  transition: border-color 220ms ease, background-color 220ms ease;
+}
+.kin-step::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 1.25rem;
+  right: 1.25rem;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 107, 31, 0) 0%,
+    rgba(255, 107, 31, 0.6) 50%,
+    rgba(255, 107, 31, 0) 100%
+  );
+  opacity: 0.6;
+}
+.kin-step:hover {
+  border-color: rgba(255, 222, 188, 0.22);
+}
+.kin-step-n {
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--kin-bone-soft);
+}
+.kin-step-title {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--kin-bone);
+}
+.kin-step-body {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--kin-bone-mute);
+}
+
+/* Make the eye behave like an interactive link target without losing its glow */
+.kin-eye-link {
+  display: inline-flex;
+  border-radius: 999px;
+  transition: transform 200ms ease, filter 200ms ease;
+}
+.kin-eye-link:hover { transform: scale(1.04); filter: brightness(1.1); }
+.kin-eye-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--kin-bg), 0 0 0 4px var(--kin-ember);
+}
+
+/* ───────────────────────────────────────────────────────────────
+   Motion system (landing) — quiet, slow, never bouncy.
+   Scroll reveals, breathing float, traveling ember sheen, word-
+   by-word headline rise, concentric eye rings.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Page-level entrance — runs once on mount. The whole landing comes
+   into focus together so arrival feels like a single editorial unveiling,
+   not a cascade. Per-section reveals (.kin-reveal) layer on top and serve
+   scroll discovery once the page has settled. */
+@keyframes kinPageIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+.kin-page-in {
+  animation: kinPageIn 1200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform, filter;
+}
+
+/* Scroll reveal — "coming into focus".
+   Each section lifts up, settles in scale, and blurs into sharpness, like
+   Kin is bringing the moment into view. Easing is expo-out (cubic-bezier
+   0.16, 1, 0.3, 1) — the smoothest "land softly" curve, no overshoot.
+   IntersectionObserver toggles `.kin-reveal-in` when on screen. */
+.kin-reveal {
+  opacity: 0;
+  transform: translateY(32px) scale(0.97);
+  filter: blur(8px);
+  transition:
+    opacity 1100ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 1200ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 900ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform, filter;
+}
+.kin-reveal-in {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+/* Optional accent — adds a one-shot ember sheen that sweeps across the
+   element as it reveals. Pair `.kin-reveal-trace` with `.kin-reveal` on
+   hero moments (the mock card, the final CTA) for that "Kin saw this"
+   acknowledgement. */
+.kin-reveal-trace {
+  position: relative;
+  isolation: isolate;
+}
+.kin-reveal-trace::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    rgba(255, 213, 106, 0.18) 50%,
+    transparent 65%
+  );
+  transform: translateX(-130%);
+  opacity: 0;
+  z-index: 2;
+}
+.kin-reveal-trace.kin-reveal-in::after {
+  animation: kinRevealSheen 1600ms cubic-bezier(0.16, 1, 0.3, 1) 280ms both;
+}
+@keyframes kinRevealSheen {
+  0%   { transform: translateX(-130%); opacity: 0; }
+  20%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { transform: translateX(130%); opacity: 0; }
+}
+
+/* Word-by-word headline rise. Wrap each word in <span class="kin-word"> and
+   inline-style the delay. The blur-out gives a "coming into focus" feel that
+   matches the watchful tone. */
+@keyframes kinWordRise {
+  0% {
+    opacity: 0;
+    transform: translateY(36px);
+    filter: blur(8px);
+    letter-spacing: 0.04em;
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+    letter-spacing: inherit;
+  }
+}
+.kin-word {
+  display: inline-block;
+  opacity: 0;
+  animation: kinWordRise 1200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Breathing float — for the mock hero card. Tiny vertical drift so the card
+   feels alive without being distracting. */
+@keyframes kinFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+.kin-float {
+  animation: kinFloat 7s ease-in-out infinite;
+}
+
+/* Ember sheen — a soft warm light that drifts across an element.
+   Used on the primary mock action to imply readiness ("1 tap"). */
+.kin-shimmer {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.kin-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 213, 106, 0.16) 50%,
+    transparent 65%
+  );
+  transform: translateX(-130%);
+  animation: kinShimmer 4.5s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+@keyframes kinShimmer {
+  0%   { transform: translateX(-130%); }
+  60%  { transform: translateX(130%); }
+  100% { transform: translateX(130%); }
+}
+
+/* Traveling top-hairline on the loop steps — same look as `.kin-step::before`
+   but animated. Implemented via background-position drift so we don't need
+   a second pseudo-element. */
+@keyframes kinTrace {
+  0%   { background-position: -120% 0; }
+  100% { background-position: 220% 0; }
+}
+.kin-step-trace::before {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 107, 31, 0) 0%,
+    rgba(255, 107, 31, 0.7) 50%,
+    rgba(255, 107, 31, 0) 100%
+  );
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+  animation: kinTrace 5.5s ease-in-out infinite;
+}
+
+/* Concentric rings that radiate from the brand eye on hover.
+   Wrap the .kin-eye in a span with .kin-eye-aura and rings appear behind it. */
+.kin-eye-aura {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  isolation: isolate;
+}
+.kin-eye-aura::before,
+.kin-eye-aura::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 107, 31, 0.35);
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  animation: kinEyeRing 4.5s ease-out infinite;
+}
+.kin-eye-aura::after {
+  animation-delay: 2.25s;
+}
+@keyframes kinEyeRing {
+  0%   { transform: translate(-50%, -50%) scale(1); opacity: 0.55; }
+  100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
 }
 
 /* Selection — keep on-brand */
