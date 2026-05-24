@@ -685,9 +685,213 @@ export const runDetection = mutation({
       results.cardsWritten++;
     }
 
+    // ── 6. Family tax-strategy opportunities ───────────────────────────
+    // Cross-source signal: only Kin can see both partners' incomes + the joint
+    // savings, so only Kin can spot income-split opportunities the banks miss.
+    // We surface ONE card with a structured list of strategies. Educational —
+    // not advice. The card itself includes a "talk to an accountant" reminder.
+    if (!accountId) {
+      try {
+        const taxOpp = await detectTaxOpportunities(ctx);
+        if (taxOpp && taxOpp.strategies.length > 0) {
+          await ctx.db.insert("cards", {
+            type: "tax_loop",
+            severity: "info",
+            title: `Family tax strategies — ~${dollarsRound(taxOpp.estAnnualSavingsCents)}/yr opportunity`,
+            body: taxOpp.summary,
+            actions: [
+              ...taxOpp.strategies.map((s) => ({
+                id: s.id,
+                label: s.title,
+                kind: "tax_strategy",
+                params: {
+                  blurb: s.blurb,
+                  estSavingsCents: s.estSavingsCents,
+                  craRef: s.craRef,
+                  applies: s.applies,
+                },
+              })),
+              {
+                id: "explored",
+                label: "Mark as explored",
+                kind: "dismiss",
+                params: {},
+              },
+            ],
+            status: "open",
+            createdAt: now,
+          });
+          results.cardsWritten++;
+        }
+      } catch (e) {
+        console.error("tax opportunity detector failed (non-fatal):", e);
+      }
+    }
+
     return results;
   },
 });
+
+// ─── Tax-opportunity detection (pure-ish; reads db) ──────────────────────────
+// Identifies legitimate Canadian household tax-saving strategies based on the
+// couple's income gap, joint-savings shape, and demographics.
+// NOT TAX ADVICE — explanatory content only. Real moves should be vetted by
+// an accountant; CRA attribution rules + lifetime contribution rooms apply.
+
+function dollarsRound(cents: number): string {
+  return `$${Math.round(cents / 100).toLocaleString("en-CA")}`;
+}
+
+type TaxStrategy = {
+  id: string;
+  title: string;
+  blurb: string;
+  estSavingsCents: number;
+  craRef: string;
+  applies: string; // why it applies to this household
+};
+
+type TaxOpportunity = {
+  summary: string;
+  estAnnualSavingsCents: number;
+  strategies: TaxStrategy[];
+};
+
+async function detectTaxOpportunities(ctx: {
+  db: {
+    query: (t: "people" | "accounts" | "transactions") => {
+      collect: () => Promise<unknown[]>;
+    };
+  };
+}): Promise<TaxOpportunity | null> {
+  const people = (await ctx.db.query("people").collect()) as {
+    _id: string;
+    name: string;
+    role: string;
+  }[];
+  const accounts = (await ctx.db.query("accounts").collect()) as {
+    _id: string;
+    ownerId: string;
+    type: string;
+    balanceCents: bigint;
+  }[];
+  const txns = (await ctx.db.query("transactions").collect()) as {
+    accountId: string;
+    amountCents: bigint;
+    category: string;
+    date: number;
+  }[];
+
+  if (people.length < 2) return null;
+
+  // Estimate annualized income per person from inflow txns over the last 90d.
+  const ninetyDaysAgo = Date.now() - 90 * DAY;
+  const acctOwner = new Map(accounts.map((a) => [a._id, a.ownerId]));
+  const incomeByPerson = new Map<string, number>();
+  for (const t of txns) {
+    if (t.amountCents <= BigInt(0)) continue;
+    if (t.date < ninetyDaysAgo) continue;
+    if (t.category !== "income") continue;
+    const ownerId = acctOwner.get(t.accountId);
+    if (!ownerId) continue;
+    incomeByPerson.set(
+      ownerId,
+      (incomeByPerson.get(ownerId) ?? 0) + Number(t.amountCents),
+    );
+  }
+  // 90d → annual
+  for (const [k, v] of incomeByPerson) {
+    incomeByPerson.set(k, Math.round(v * (365 / 90)));
+  }
+
+  // Pick the highest + lowest earner
+  const ranked = [...people]
+    .map((p) => ({
+      ...p,
+      annualIncomeCents: incomeByPerson.get(p._id) ?? 0,
+    }))
+    .sort((a, b) => b.annualIncomeCents - a.annualIncomeCents);
+  const high = ranked[0];
+  const low = ranked[ranked.length - 1];
+  if (high.annualIncomeCents === 0 || low.annualIncomeCents === 0) return null;
+  const gapCents = high.annualIncomeCents - low.annualIncomeCents;
+  // Skip if both earn the same.
+  if (gapCents <= 0) return null;
+
+  // Marginal-rate spread (Ontario, demo-grade approximation):
+  //   $80k–95k → ~30%, $50k–75k → ~29.65%, ~25% in retirement.
+  // Spread = ~5 cents on the dollar of shifted income on average.
+  const marginalSpread = 0.05;
+
+  const jointSavings = accounts.find(
+    (a) => a.type === "joint" || a.type === "savings",
+  );
+  const jointBalanceCents = jointSavings ? Number(jointSavings.balanceCents) : 0;
+
+  const strategies: TaxStrategy[] = [];
+
+  // 1. Spousal RRSP — always relevant when there's a gap.
+  const rrspContribSuggestion = Math.min(500000, Math.round(high.annualIncomeCents * 0.06));
+  const rrspSavings = Math.round(rrspContribSuggestion * marginalSpread);
+  strategies.push({
+    id: "spousal-rrsp",
+    title: "Spousal RRSP",
+    blurb: `${high.name} contributes to ${low.name}'s RRSP. ${high.name} gets the deduction at their higher rate now; ${low.name} withdraws at a lower rate later. The contribution still uses ${high.name}'s contribution room.`,
+    estSavingsCents: rrspSavings,
+    craRef: "Spousal RRSPs (CRA T4040)",
+    applies: `Income gap of ${dollarsRound(gapCents)}/yr between ${high.name} and ${low.name}.`,
+  });
+
+  // 2. TFSA contribution gift — tax-free growth, no attribution back.
+  // Assume gifting $7K annually to fill low's TFSA room.
+  // Estimate ~5% return, growth tax-free; counterfactual is high earner
+  // investing same money in non-registered → ~50% of return taxed at high rate.
+  // Demo savings: 5% × 7k × 30% × 0.5 ≈ $52/yr (small, so we mention long horizon).
+  const tfsaSavings = Math.round(700000 * 0.05 * 0.30 * 0.5);
+  strategies.push({
+    id: "tfsa-gift",
+    title: "TFSA contribution gift",
+    blurb: `${high.name} gifts up to ${dollarsRound(700000)}/yr to ${low.name} to fill ${low.name}'s TFSA. CRA's attribution rules don't follow income earned inside a TFSA — every dollar of growth is ${low.name}'s, tax-free.`,
+    estSavingsCents: tfsaSavings,
+    craRef: "TFSA attribution exception (ITA 74.5(12))",
+    applies: `Both partners have separate TFSA contribution rooms (~${dollarsRound(700000)}/yr each).`,
+  });
+
+  // 3. Joint-savings titling
+  if (jointBalanceCents > 100000) {
+    // 4% interest, tax shifted from high (30%) to low (25%) = ~5% savings
+    const interestCents = Math.round(jointBalanceCents * 0.04);
+    const titlingSavings = Math.round(interestCents * marginalSpread);
+    strategies.push({
+      id: "joint-titling",
+      title: "Joint savings titling",
+      blurb: `Interest on a joint account is taxed in proportion to who funded it. If ${low.name} contributed most of the joint savings, ensure ${low.name}'s name is the primary holder — interest gets taxed at the lower marginal rate.`,
+      estSavingsCents: titlingSavings,
+      craRef: "Attribution rules — beneficial ownership (CRA Folio S1-F5-C1)",
+      applies: `Joint savings balance: ${dollarsRound(jointBalanceCents)}.`,
+    });
+  }
+
+  // 4. Prescribed-rate loan — gets nuanced; mention only when joint $ is meaningful.
+  if (jointBalanceCents >= 1000000) {
+    strategies.push({
+      id: "prescribed-loan",
+      title: "Prescribed-rate spousal loan",
+      blurb: `${high.name} formally loans investing capital to ${low.name} at CRA's prescribed rate (currently ~5%). Investment returns above the rate are ${low.name}'s — taxed at their lower rate. Requires a written promissory note + interest paid yearly by Jan 30.`,
+      estSavingsCents: Math.round(jointBalanceCents * 0.03 * marginalSpread),
+      craRef: "Prescribed rate loans (ITA 74.5(2))",
+      applies: `Worth considering once joint savings is ≥${dollarsRound(1000000)}.`,
+    });
+  }
+
+  const total = strategies.reduce((s, x) => s + x.estSavingsCents, 0);
+
+  return {
+    summary: `Kin sees both incomes (${high.name} ~${dollarsRound(high.annualIncomeCents)}/yr, ${low.name} ~${dollarsRound(low.annualIncomeCents)}/yr) and your joint savings — a ${dollarsRound(gapCents)}/yr gap opens a few legitimate income-splitting moves your bank can't spot. ${strategies.length} strategies below. Educational only — confirm with an accountant before acting; CRA attribution rules + contribution rooms apply.`,
+    estAnnualSavingsCents: total,
+    strategies,
+  };
+}
 
 // ─── Query: get computed baseline for an account ─────────────────────────────
 

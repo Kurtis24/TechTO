@@ -101,6 +101,7 @@ export default defineSchema({
       v.literal("creep"),
       v.literal("outlier"),
       v.literal("info"),
+      v.literal("tax_loop"), // family tax-saving / income-splitting opportunities
     ),
     severity: v.union(
       v.literal("info"),

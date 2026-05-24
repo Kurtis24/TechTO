@@ -6,6 +6,7 @@ import { api } from "../convex/_generated/api";
 import { AccountStrip } from "./components/AccountStrip";
 import { HeroCard } from "./components/HeroCard";
 import { ByproductCard } from "./components/ByproductCard";
+import { TaxLoopCard } from "./components/TaxLoopCard";
 
 export default function Home() {
   const accounts = useQuery(api.queries.getAccounts);
@@ -44,10 +45,17 @@ export default function Home() {
 
   const byproducts =
     openCards?.filter(
-      (c) => c.type === "duplicate" || c.type === "creep" || c.type === "outlier"
+      (c) =>
+        c.type === "duplicate" ||
+        c.type === "creep" ||
+        c.type === "outlier" ||
+        c.type === "info",
     ) ?? [];
 
+  const taxLoops = openCards?.filter((c) => c.type === "tax_loop") ?? [];
+
   const totalTxnCount = resolvedCards?.length ?? 0;
+  // Attention = real "pings" (alerts + hero). Tax-loop is an opportunity, not a ping.
   const attentionCount = byproducts.length + (heroToShow ? 1 : 0);
   const silentCount = Math.max(
     1400 - attentionCount,
@@ -189,6 +197,17 @@ export default function Home() {
 
           {heroToShow && <HeroCard card={heroToShow} />}
 
+          {taxLoops.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-[11px] uppercase tracking-[0.22em] text-kin-bone-soft pl-1">
+                Family planning
+              </h3>
+              {taxLoops.map((c) => (
+                <TaxLoopCard key={c._id} card={c} />
+              ))}
+            </div>
+          )}
+
           {byproducts.length > 0 && (
             <div className="space-y-2">
               <h3 className="text-[11px] uppercase tracking-[0.22em] text-kin-bone-soft pl-1">
@@ -211,7 +230,7 @@ export default function Home() {
             </div>
           )}
 
-          {!loading && !heroToShow && byproducts.length === 0 && (
+          {!loading && !heroToShow && byproducts.length === 0 && taxLoops.length === 0 && (
             <div className="kin-card grid place-items-center px-6 py-14 text-center">
               <span
                 className="kin-eye mb-4"
