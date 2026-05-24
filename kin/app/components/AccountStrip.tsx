@@ -95,7 +95,7 @@ function bankShortName(institution: string): string {
   const trimmed = institution.trim();
   if (/td bank/i.test(trimmed)) return "TD";
   if (/^rbc/i.test(trimmed)) return "RBC";
-  if (/tangerine/i.test(trimmed)) return "Tangerine";
+  if (/tangerine/i.test(trimmed)) return "Tang.";
   return trimmed;
 }
 

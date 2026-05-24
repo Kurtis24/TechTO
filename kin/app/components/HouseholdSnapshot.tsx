@@ -59,8 +59,10 @@ function bucketFor(account: Account, viewerId: Id<"people"> | null): Bucket {
 }
 
 const RADIUS = 42;
-const STROKE_WIDTH = 16;
+const STROKE_WIDTH = 14;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+// Visual gap between adjacent slices, in path units (≈2.7° per slice gap).
+const SLICE_GAP = 2;
 
 export function HouseholdSnapshot({ accounts, agreements, people, viewerId }: Props) {
   const { totalCents, slices, accountsCount, partnerName } = useMemo(() => {
@@ -127,87 +129,105 @@ export function HouseholdSnapshot({ accounts, agreements, people, viewerId }: Pr
 
   return (
     <section className="kin-snapshot" aria-label="Household balance snapshot">
-      <div className="kin-snapshot-eyebrow">
+      <header className="kin-snapshot-eyebrow">
         <span className="kin-snapshot-eyebrow-label">Household · by the numbers</span>
         <span className="kin-snapshot-eyebrow-hint">
-          {accountsCount} account{accountsCount === 1 ? "" : "s"}
+          {accountsCount} account{accountsCount === 1 ? "" : "s"} · net liquid
         </span>
-      </div>
+      </header>
 
-      <div className="kin-snapshot-donut-wrap">
-        <svg
-          viewBox="0 0 100 100"
-          className="kin-snapshot-donut"
-          role="img"
-          aria-label={ariaSummary}
-        >
-          {/* Track — full ring at low contrast */}
-          <circle
-            cx="50"
-            cy="50"
-            r={RADIUS}
-            strokeWidth={STROKE_WIDTH}
-            className="kin-snapshot-track"
-          />
-          {slices.map((s, i) => (
+      <div className="kin-snapshot-body">
+        <div className="kin-snapshot-donut-wrap">
+          <svg
+            viewBox="0 0 100 100"
+            className="kin-snapshot-donut"
+            role="img"
+            aria-label={ariaSummary}
+          >
+            {/* Track — full ring at low contrast */}
             <circle
-              key={s.key}
               cx="50"
               cy="50"
               r={RADIUS}
               strokeWidth={STROKE_WIDTH}
-              stroke={BUCKET_COLOR[s.key]}
-              strokeDasharray={`${s.sliceLen} ${CIRCUMFERENCE - s.sliceLen}`}
-              strokeDashoffset={-s.accStart}
-              className="kin-snapshot-slice"
-              style={
-                {
-                  ["--kin-slice-delay"]: `${i * 130}ms`,
-                  color: BUCKET_COLOR[s.key],
-                } as React.CSSProperties
-              }
+              className="kin-snapshot-track"
             />
-          ))}
-        </svg>
-        <div className="kin-snapshot-center" aria-hidden="true">
-          <div className="kin-snapshot-center-inner">
-            <span className="kin-snapshot-center-eyebrow">Household</span>
-            <span className="kin-snapshot-center-amount">
-              {formatMoneyShort(totalCents)}
-            </span>
-            <span className="kin-snapshot-center-sub">net liquid</span>
+            {slices.map((s, i) => {
+              // Shrink the visible stroke by SLICE_GAP so adjacent slices
+              // have a small breathing gap. The next slice still starts
+              // at accStart + sliceLen, so the gap shows cleanly.
+              const visibleLen = Math.max(0, s.sliceLen - SLICE_GAP);
+              return (
+                <circle
+                  key={s.key}
+                  cx="50"
+                  cy="50"
+                  r={RADIUS}
+                  strokeWidth={STROKE_WIDTH}
+                  stroke={BUCKET_COLOR[s.key]}
+                  strokeDasharray={`${visibleLen} ${CIRCUMFERENCE - visibleLen}`}
+                  strokeDashoffset={-s.accStart}
+                  className="kin-snapshot-slice"
+                  style={
+                    {
+                      ["--kin-slice-delay"]: `${i * 130}ms`,
+                      color: BUCKET_COLOR[s.key],
+                    } as React.CSSProperties
+                  }
+                />
+              );
+            })}
+          </svg>
+          <div className="kin-snapshot-center" aria-hidden="true">
+            <div className="kin-snapshot-center-inner">
+              <span className="kin-snapshot-center-eyebrow">Household</span>
+              <span className="kin-snapshot-center-amount">
+                {formatMoneyShort(totalCents)}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="kin-snapshot-legend" role="list">
-        {slices.map((s) => (
-          <div key={s.key} className="kin-snapshot-legend-row" role="listitem">
-            <span
-              className="kin-snapshot-legend-dot"
-              style={{ background: BUCKET_COLOR[s.key] }}
-              aria-hidden="true"
-            />
-            <span className="kin-snapshot-legend-label">
-              {BUCKET_LABEL[s.key]}
-              {s.key === "partner" && partnerName ? (
-                <span className="kin-snapshot-legend-label-sub">· {partnerName}</span>
-              ) : (
-                <span className="kin-snapshot-legend-label-sub">
-                  · {s.count} acct{s.count === 1 ? "" : "s"}
-                </span>
-              )}
-            </span>
-            <span className="kin-snapshot-legend-amount">
-              {formatMoneyShort(s.cents)}
-            </span>
+        <div className="kin-snapshot-meta">
+          <div className="kin-snapshot-legend" role="list">
+            {slices.map((s) => {
+              const share =
+                totalCents === 0n
+                  ? 0
+                  : Math.round((Number(s.cents) / Number(totalCents)) * 100);
+              const sub =
+                s.key === "partner" && partnerName
+                  ? partnerName
+                  : `${s.count} ${s.count === 1 ? "account" : "accounts"}`;
+              return (
+                <div
+                  key={s.key}
+                  className="kin-snapshot-legend-row"
+                  role="listitem"
+                >
+                  <span
+                    className="kin-snapshot-legend-dot"
+                    style={{ background: BUCKET_COLOR[s.key] }}
+                    aria-hidden="true"
+                  />
+                  <span className="kin-snapshot-legend-label">
+                    {BUCKET_LABEL[s.key]}
+                    <span className="kin-snapshot-legend-label-sub">{sub}</span>
+                  </span>
+                  <span className="kin-snapshot-legend-amount">
+                    {formatMoneyShort(s.cents)}
+                    <span className="kin-snapshot-legend-share">{share}%</span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
-        ))}
-      </div>
 
-      {activeAgreement && (
-        <AgreementStat agreement={activeAgreement} viewerId={viewerId} />
-      )}
+          {activeAgreement && (
+            <AgreementStat agreement={activeAgreement} viewerId={viewerId} />
+          )}
+        </div>
+      </div>
 
       {/* AT-only data table mirroring the donut */}
       <dl className="kin-sr-only">

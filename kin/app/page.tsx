@@ -179,13 +179,13 @@ export default function Home() {
 
         <div className="kin-hr mt-5" aria-hidden="true" />
 
-        {/* ── Dashboard grid ───────────────────────────────────────────
-            Single column below xl; feed + sticky rail above. The rail
-            holds the household snapshot (donut) so wide screens stop
-            wasting their side space. */}
-        <div className="kin-shell-grid mt-7">
-          <div className="min-w-0">
-            {/* ── Account strip ─────────────────────────────────────── */}
+        {/* ── Two-column dashboard ─────────────────────────────────────
+            At xl+: household (left, sticky) + scrollable feed (right).
+            Below xl: single column, household first then feed. */}
+        <div className="kin-dashboard mt-7">
+
+          {/* ── LEFT: household column ──────────────────────────────── */}
+          <div className="kin-dashboard-household">
             <section
               className="kin-rise"
               style={{ animationDelay: "120ms" }}
@@ -217,31 +217,24 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
-                <AccountStrip
-                  accounts={accounts ?? []}
-                  agreements={agreements ?? []}
-                  people={people ?? []}
-                  viewerId={currentViewer?._id ?? null}
-                />
+                <>
+                  <AccountStrip
+                    accounts={accounts ?? []}
+                    agreements={agreements ?? []}
+                    people={people ?? []}
+                    viewerId={currentViewer?._id ?? null}
+                  />
+                  {hasAccounts && <HouseholdSnapshot {...snapshotProps} />}
+                </>
               )}
             </section>
+          </div>
 
-            {/* Inline household snapshot — only renders below xl, where
-                the right rail isn't available. */}
-            {!loading && hasAccounts && (
-              <div
-                className="kin-rise mt-5 xl:hidden"
-                style={{ animationDelay: "150ms" }}
-              >
-                <HouseholdSnapshot {...snapshotProps} />
-              </div>
-            )}
-
-            {/* ── Focus brief — only shown when there's no open hero card.
-                When the hero card is visible it narrates itself; the brief
-                would just double up and push it further down the page. */}
+          {/* ── RIGHT: feed column (scrollable) ─────────────────────── */}
+          <div className="kin-dashboard-feed">
+            {/* Focus brief — only shown when there's no open hero card. */}
             {!loading && hasAccounts && !hero && (
-              <section className="mt-7" aria-label="Right now">
+              <section className="kin-rise" style={{ animationDelay: "150ms" }} aria-label="Right now">
                 <FocusBrief
                   hero={heroToShow ?? null}
                   byproductCount={byproducts.length}
@@ -251,9 +244,9 @@ export default function Home() {
               </section>
             )}
 
-            {/* ── The feed ──────────────────────────────────────────── */}
+            {/* The feed */}
             <section
-              className="kin-rise mt-8 space-y-5"
+              className="kin-rise mt-7 space-y-5"
               style={{ animationDelay: "180ms" }}
               aria-label="Kin feed"
             >
@@ -320,10 +313,10 @@ export default function Home() {
               )}
             </section>
 
-            {/* ── Handled today ──────────────────────────────────────── */}
+            {/* Handled today */}
             {!loading && resolvedCards && <HandledRail cards={resolvedCards} />}
 
-            {/* ── Footer ─────────────────────────────────────────────── */}
+            {/* Footer */}
             {!loading && accounts && accounts.length > 0 && (
               <footer className="mt-16">
                 <div className="kin-hr mb-6" aria-hidden="true" />
@@ -342,17 +335,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* ── Right rail (xl+ only) ─────────────────────────────────
-              Sticky household snapshot so the donut stays visible while
-              the feed scrolls. Hidden on smaller screens — the inline
-              copy above takes over. */}
-          <aside
-            className="kin-rail kin-rail-sticky hidden xl:flex kin-rise"
-            style={{ animationDelay: "160ms" }}
-            aria-label="Household at a glance"
-          >
-            {!loading && hasAccounts && <HouseholdSnapshot {...snapshotProps} />}
-          </aside>
         </div>
       </div>
     </main>
