@@ -46,19 +46,34 @@ export async function routeInboundSmsWithLlm(input: {
     return { ...routeInboundSms(input), routedBy: "fallback" };
   }
 
-  const catalog = SMS_ROUTABLE_TOOLS.map(
-    (t) => `- ${t.name}: ${t.description} Args: ${t.argsHint}`,
-  ).join("\n");
+  // accounts/agreements/cards/subscribers are loaded for the reply automatically
+  // (see PRELOADED_TOOLS in smsExecutor.ts), so we hide them from the LLM to
+  // save tokens AND to avoid the LLM picking redundant context tools.
+  const PRELOADED = new Set<string>([
+    "convex_get_accounts",
+    "convex_get_agreements",
+    "convex_get_cards",
+    "convex_get_subscribers",
+  ]);
+  const catalog = SMS_ROUTABLE_TOOLS.filter((t) => !PRELOADED.has(t.name))
+    .map((t) => `- ${t.name}: ${t.description} Args: ${t.argsHint}`)
+    .join("\n");
 
   const prompt = `
 You are Kin's SMS routing planner. Given an inbound text message, choose which backend tools to run BEFORE the system sends a reply.
 
-AVAILABLE TOOLS (only these names are valid):
+ALREADY LOADED (the reply step has these automatically — do NOT request them):
+- household account balances
+- open / requested agreements between partners
+- active feed alerts (overdraft, duplicate, creep, outlier)
+- subscriber phone → name map
+
+ADDITIONAL TOOLS YOU CAN CHOOSE (only these names are valid):
 ${catalog}
 
 RULES:
 1. Return ONLY valid JSON (no markdown, no prose outside JSON).
-2. Pick 0–6 tools that help answer the user's intent. Omit tools that are not needed.
+2. Pick 0–4 tools — only the ones the loaded context above can't answer (e.g. specific transactions, a per-account forecast, a re-run of the detection engine). For balance/agreement/alert questions: empty tools array.
 3. Do NOT include: convex_create_message_card, convex_chat_reply, convex_send_sms (the system adds those automatically unless you chose convex_send_briefing).
 4. Use convex_send_briefing ONLY when the user clearly wants a morning briefing / daily summary. Otherwise do not include it.
 5. For convex_get_forecast include a real accountId from ACCOUNT HINTS below.

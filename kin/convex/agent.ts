@@ -21,12 +21,17 @@
  * (strings) for readability, but every state mutation is cents.
  */
 
-import { action } from "./_generated/server";
+import { action, type ActionCtx } from "./_generated/server";
 import { api } from "./_generated/api";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { BackboardClient, type ChatMessagesResponse } from "backboard-sdk";
-import { executeSmsPlanStep } from "./smsExecutor";
+import {
+  executeSmsPlanStep,
+  PRELOADED_TOOLS,
+  TERMINAL_TOOLS,
+  type Preloaded,
+} from "./smsExecutor";
 import { routeInboundSmsWithLlm } from "./smsLlmRouter";
 
 const MODEL = {
@@ -478,6 +483,16 @@ export const bootstrapDemo = action({
 // ─── handleInboundSms ────────────────────────────────────────────────────────
 // Twilio webhook + MCP kin_handle_inbound_sms share this pipeline:
 // route → execute plan → optional Twilio reply.
+//
+// Performance shape (see docs/sms-perf-handoff.md):
+//   1. Preload accounts/agreements/cards/subscribers in parallel ONCE — the
+//      router uses these as hints AND chatReply uses them to build the prompt,
+//      so we used to query them ~3× per inbound text.
+//   2. Drop any redundant `convex_get_*` steps the router/LLM picks for data
+//      we already have.
+//   3. Run remaining context steps in parallel; run terminal steps sequentially.
+//   4. Inline chatReply (no `ctx.runAction` boot) by passing preloaded context
+//      through ExecuteState.
 export const handleInboundSms = action({
   args: {
     phone: v.string(),
@@ -490,16 +505,29 @@ export const handleInboundSms = action({
   handler: async (ctx, args) => {
     const execute = args.execute ?? true;
 
-    const accounts = await ctx.runQuery(api.queries.getAccounts, {});
-    const cards = await ctx.runQuery(api.queries.getCards, {});
-    const accountHints = accounts
+    // ── 1. Preload everything chatReply + the router need, in parallel ─────
+    const [accountsRaw, agreementsRaw, cardsRaw, subscribersRaw] =
+      await Promise.all([
+        ctx.runQuery(api.queries.getAccounts, {}),
+        ctx.runQuery(api.queries.getAgreements, {}),
+        ctx.runQuery(api.queries.getCards, {}),
+        ctx.runQuery(api.queries.getSubscribers, { activeOnly: false }),
+      ]);
+    const preloaded: Preloaded = {
+      accounts: accountsRaw as Preloaded["accounts"],
+      agreements: agreementsRaw as Preloaded["agreements"],
+      cards: cardsRaw as Preloaded["cards"],
+      subscribers: subscribersRaw as Preloaded["subscribers"],
+    };
+
+    const accountHints = preloaded.accounts
       .map(
         (a) =>
           `${a._id} | ${a.institution} ${a.type} | ${dollars(a.balanceCents)}`,
       )
       .join("\n");
     const openCardHints =
-      cards
+      preloaded.cards
         .slice(0, 8)
         .map((c) => `- [${c.severity}] ${c.type}: ${c.title}`)
         .join("\n") || "(none)";
@@ -511,7 +539,10 @@ export const handleInboundSms = action({
       openCardHints,
     });
 
-    // Enrich createMessageCard step with webhook metadata.
+    // ── 2. Drop redundant context steps + enrich terminal step args ────────
+    plan.recommendedTools = plan.recommendedTools.filter(
+      (s) => !PRELOADED_TOOLS.has(s.tool),
+    );
     for (const step of plan.recommendedTools) {
       if (step.tool === "convex_create_message_card") {
         step.args = {
@@ -549,19 +580,53 @@ export const handleInboundSms = action({
       };
     }
 
-    const state: { reply?: string } = {};
-    const results = [];
+    // ── 3. Split into context (parallel) vs terminals (sequential) ──────────
+    // The terminal phase is ordered: create_message_card → chat_reply (or
+    // briefing) → send_sms. Anything else is a safe-to-parallelize side query
+    // (forecast, transactions, run_detection, etc.).
+    const state: { reply?: string; preloaded: Preloaded } = { preloaded };
+    const contextSteps = plan.recommendedTools.filter(
+      (s) => !TERMINAL_TOOLS.has(s.tool),
+    );
+    const terminalSteps = plan.recommendedTools.filter((s) =>
+      TERMINAL_TOOLS.has(s.tool),
+    );
 
-    for (const step of plan.recommendedTools) {
-      const res = await executeSmsPlanStep(ctx, step, state);
-      results.push(res);
+    const contextResults = await Promise.all(
+      contextSteps.map((s) => executeSmsPlanStep(ctx, s, state)),
+    );
+
+    const terminalResults = [];
+    for (const step of terminalSteps) {
+      if (step.tool === "convex_chat_reply") {
+        // Inline the reply: skip the action cold-start AND let chatReply use
+        // the context we already preloaded above (~500ms saved).
+        try {
+          const r = await runChatReplyWithContext(
+            ctx,
+            step.args.phone as string,
+            step.args.body as string,
+            preloaded,
+          );
+          state.reply = r.reply;
+          terminalResults.push({ tool: step.tool, ok: true, result: r });
+        } catch (e: unknown) {
+          terminalResults.push({
+            tool: step.tool,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+        continue;
+      }
+      terminalResults.push(await executeSmsPlanStep(ctx, step, state));
     }
 
     return {
       summary: plan.summary,
       plan: plan.recommendedTools,
       routedBy: plan.routedBy,
-      results,
+      results: [...contextResults, ...terminalResults],
       reply: state.reply,
     };
   },
@@ -599,88 +664,111 @@ export const planInboundSms = action({
 // Inbound SMS → agent reply. One Backboard assistant per phone, so
 // conversation memory accumulates per person across messages.
 // Returns the reply string (the http webhook handles sending it via Twilio).
+//
+// The action is a thin wrapper around `runChatReplyWithContext` so callers
+// from outside the SMS pipeline (MCP tools, dashboard) still work, while the
+// SMS pipeline can call the helper directly and skip both the action cold-
+// start AND the duplicate context queries.
 export const chatReply = action({
   args: { phone: v.string(), body: v.string() },
   handler: async (ctx, { phone, body }): Promise<{ reply: string }> => {
-    // ── 1. Pull current household snapshot for context ──────────────────────
-    const accounts = await ctx.runQuery(api.queries.getAccounts, {});
-    const agreements = await ctx.runQuery(api.queries.getAgreements, {});
-    const cards = await ctx.runQuery(api.queries.getCards, {});
-
-    const subs = await ctx.runQuery(api.queries.getSubscribers, {
-      activeOnly: false,
+    const [accountsRaw, agreementsRaw, cardsRaw, subscribersRaw] =
+      await Promise.all([
+        ctx.runQuery(api.queries.getAccounts, {}),
+        ctx.runQuery(api.queries.getAgreements, {}),
+        ctx.runQuery(api.queries.getCards, {}),
+        ctx.runQuery(api.queries.getSubscribers, { activeOnly: false }),
+      ]);
+    return runChatReplyWithContext(ctx, phone, body, {
+      accounts: accountsRaw as Preloaded["accounts"],
+      agreements: agreementsRaw as Preloaded["agreements"],
+      cards: cardsRaw as Preloaded["cards"],
+      subscribers: subscribersRaw as Preloaded["subscribers"],
     });
-    const sub = subs.find((s) => s.phone === phone);
-    const senderName = sub?.name ?? "there";
+  },
+});
 
-    const balanceLines = accounts
-      .map((a) => `- ${a.institution} ${a.type}: ${dollars(a.balanceCents)}`)
-      .join("\n");
-    const agreementLines = agreements
-      .filter((a) => a.status !== "settled")
-      .map(
-        (a) =>
-          `- ${a.fromName} owes ${a.toName} ${dollars(a.amountCents)} (${a.reason}, ${a.status})`,
-      )
-      .join("\n");
-    const alertLines = cards
-      .slice(0, 5)
-      .map((c) => `- [${c.severity}] ${c.title}`)
-      .join("\n");
+/**
+ * Same as the `chatReply` action body but takes pre-loaded context. Called
+ * directly from `handleInboundSms` (and from the executor) so the SMS path
+ * doesn't pay the cost of a second action cold-start or a re-fetch of data
+ * we already have in scope.
+ */
+export async function runChatReplyWithContext(
+  ctx: ActionCtx,
+  phone: string,
+  body: string,
+  preloaded: Preloaded,
+): Promise<{ reply: string }> {
+  const { accounts, agreements, cards, subscribers } = preloaded;
+  const sub = subscribers.find((s) => s.phone === phone);
+  const senderName = sub?.name ?? "there";
 
-    // ── 2. Per-phone assistant: get or create ──────────────────────────────
-    const bb = backboard();
-    let pa = await ctx.runMutation(api.mutations.getPhoneAssistant, { phone });
+  const balanceLines = accounts
+    .map((a) => `- ${a.institution} ${a.type}: ${dollars(a.balanceCents)}`)
+    .join("\n");
+  const agreementLines = agreements
+    .filter((a) => a.status !== "settled")
+    .map(
+      (a) =>
+        `- ${a.fromName} owes ${a.toName} ${dollars(a.amountCents)} (${a.reason}, ${a.status})`,
+    )
+    .join("\n");
+  const alertLines = cards
+    .slice(0, 5)
+    .map((c) => `- [${c.severity}] ${c.title}`)
+    .join("\n");
 
-    if (!pa) {
-      const boot = asChat(
-        await bb.sendMessage({
-          content:
-            `You are Kin, a calm household financial guardian texting with ${senderName}. Acknowledge in 5 words.`,
-          memory: "Auto",
-          ...MODEL,
-        }),
-      );
-      if (!boot.assistantId || !boot.threadId) {
-        return {
-          reply:
-            "Hi — Kin here. I'm having trouble waking up right now, try again in a minute.",
-        };
-      }
-      await ctx.runMutation(api.mutations.setPhoneAssistant, {
-        phone,
-        assistantId: boot.assistantId,
-        threadId: boot.threadId,
-      });
-      pa = {
-        assistantId: boot.assistantId,
-        threadId: boot.threadId,
-        primed: false,
+  // ── Per-phone assistant: get or create ────────────────────────────────────
+  const bb = backboard();
+  let pa = await ctx.runMutation(api.mutations.getPhoneAssistant, { phone });
+
+  if (!pa) {
+    const boot = asChat(
+      await bb.sendMessage({
+        content: `You are Kin, a calm household financial guardian texting with ${senderName}. Acknowledge in 5 words.`,
+        memory: "Auto",
+        ...MODEL,
+      }),
+    );
+    if (!boot.assistantId || !boot.threadId) {
+      return {
+        reply:
+          "Hi — Kin here. I'm having trouble waking up right now, try again in a minute.",
       };
     }
+    await ctx.runMutation(api.mutations.setPhoneAssistant, {
+      phone,
+      assistantId: boot.assistantId,
+      threadId: boot.threadId,
+    });
+    pa = {
+      assistantId: boot.assistantId,
+      threadId: boot.threadId,
+      primed: false,
+    };
+  }
 
-    // ── 3. Prime memory once with the household context (per phone) ────────
-    if (!pa.primed) {
-      const priming = [
-        `Texter: ${senderName} (phone ${phone}).`,
-        `Accounts:\n${balanceLines || "(none)"}`,
-        `Open agreements:\n${agreementLines || "(none)"}`,
-      ];
-      for (const content of priming) {
-        try {
-          await bb.addMemory(pa.assistantId, {
-            content,
-            metadata: { source: "kin-sms", kind: "sms-context", phone },
-          });
-        } catch (e) {
-          console.error("addMemory failed (non-fatal):", e);
-        }
-      }
-      await ctx.runMutation(api.mutations.markPhoneAssistantPrimed, { phone });
-    }
+  // ── Prime memory once with the household context (per phone) ──────────────
+  // Fire-and-forget via the scheduler so the FIRST reply doesn't wait on three
+  // sequential Backboard addMemory writes (~800-1500ms). The reply itself
+  // already includes the same context inline in the prompt — priming only
+  // matters for the NEXT reply.
+  if (!pa.primed) {
+    const items = [
+      `Texter: ${senderName} (phone ${phone}).`,
+      `Accounts:\n${balanceLines || "(none)"}`,
+      `Open agreements:\n${agreementLines || "(none)"}`,
+    ];
+    await ctx.scheduler.runAfter(0, api.agent.primePhoneAssistantMemory, {
+      phone,
+      assistantId: pa.assistantId,
+      items,
+    });
+  }
 
-    // ── 4. Ask the LLM ──────────────────────────────────────────────────────
-    const systemContext = `
+  // ── Ask the LLM ───────────────────────────────────────────────────────────
+  const systemContext = `
 LIVE CONTEXT (use only what's relevant; do NOT dump it all):
 Accounts:
 ${balanceLines || "(none)"}
@@ -692,7 +780,7 @@ Recent alerts:
 ${alertLines || "(none)"}
 `.trim();
 
-    const prompt = `
+  const prompt = `
 You are Kin, a calm household financial guardian replying to a text message from ${senderName}.
 
 ${systemContext}
@@ -707,36 +795,67 @@ Reply rules:
 - If the user asks Kin to do something concrete (move money, send e-transfer, call), say "I can do that — open the app to confirm with one tap" rather than promising.
 - If you don't know, say so briefly.
 Return ONLY the reply text.
-    `.trim();
+  `.trim();
 
-    let reply = "";
-    try {
-      const r = asChat(
-        await bb.sendMessage({
-          content: prompt,
-          assistantId: pa.assistantId,
-          threadId: pa.threadId,
-          memory: "Auto",
-          ...MODEL,
-        }),
-      );
-      reply = (r.content ?? "").trim();
-      if (r.threadId && r.threadId !== pa.threadId) {
-        await ctx.runMutation(api.mutations.updatePhoneAssistantThread, {
-          phone,
-          threadId: r.threadId,
+  let reply = "";
+  try {
+    const r = asChat(
+      await bb.sendMessage({
+        content: prompt,
+        assistantId: pa.assistantId,
+        threadId: pa.threadId,
+        memory: "Auto",
+        ...MODEL,
+      }),
+    );
+    reply = (r.content ?? "").trim();
+    if (r.threadId && r.threadId !== pa.threadId) {
+      await ctx.runMutation(api.mutations.updatePhoneAssistantThread, {
+        phone,
+        threadId: r.threadId,
+      });
+    }
+  } catch (err) {
+    console.error("chatReply Backboard error:", err);
+  }
+
+  if (!reply) {
+    reply = `Got your message, ${senderName}. Kin's brain is offline for a sec — try again or open the app to see your accounts.`;
+  }
+  if (reply.length > 1500) reply = reply.slice(0, 1497) + "…";
+
+  return { reply };
+}
+
+// ─── primePhoneAssistantMemory ───────────────────────────────────────────────
+// Scheduled fire-and-forget priming. The first inbound SMS per phone schedules
+// this to write the household context into the assistant's Backboard memory so
+// subsequent replies can use the memory channel instead of repeating context
+// in every prompt. We do NOT block the user's first reply on this.
+export const primePhoneAssistantMemory = action({
+  args: {
+    phone: v.string(),
+    assistantId: v.string(),
+    items: v.array(v.string()),
+  },
+  handler: async (ctx, { phone, assistantId, items }) => {
+    const bb = backboard();
+    for (const content of items) {
+      try {
+        await bb.addMemory(assistantId, {
+          content,
+          metadata: { source: "kin-sms", kind: "sms-context", phone },
         });
+      } catch (e) {
+        console.error("primePhoneAssistantMemory addMemory failed:", e);
       }
-    } catch (err) {
-      console.error("chatReply Backboard error:", err);
     }
-
-    if (!reply) {
-      reply = `Got your message, ${senderName}. Kin's brain is offline for a sec — try again or open the app to see your accounts.`;
+    try {
+      await ctx.runMutation(api.mutations.markPhoneAssistantPrimed, { phone });
+    } catch (e) {
+      console.error("primePhoneAssistantMemory markPrimed failed:", e);
     }
-    if (reply.length > 1500) reply = reply.slice(0, 1497) + "…";
-
-    return { reply };
+    return { ok: true };
   },
 });
 
