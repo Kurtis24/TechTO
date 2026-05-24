@@ -59,23 +59,20 @@ http.route({
       return twiml("");
     }
 
-    // Route + execute MCP-aligned pipeline (feed card, Backboard reply, Twilio).
+    // Hand off the pipeline (feed card, Backboard reply, Twilio send) to the
+    // scheduler so we can return TwiML to Twilio in <100ms. This eliminates
+    // any chance of Twilio retrying on slow LLM calls and unblocks the
+    // webhook's HTTP response from the actual processing.
     try {
-      const pipeline = await ctx.runAction(api.agent.handleInboundSms, {
+      await ctx.scheduler.runAfter(0, api.agent.handleInboundSms, {
         phone: from,
         body,
         messageSid,
         to,
         execute: true,
       });
-      if (pipeline.results.some((r) => !r.ok)) {
-        console.error(
-          "handleInboundSms partial failure:",
-          pipeline.results.filter((r) => !r.ok),
-        );
-      }
     } catch (err) {
-      console.error("handleInboundSms pipeline error (non-fatal):", err);
+      console.error("handleInboundSms schedule error (non-fatal):", err);
     }
 
     return twiml("");

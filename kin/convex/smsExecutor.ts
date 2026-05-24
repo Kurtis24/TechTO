@@ -1,10 +1,20 @@
 /**
  * Executes MCP-named tool steps inside Convex actions (handleInboundSms).
+ *
+ * Performance shape:
+ *   - `Preloaded` is the snapshot `handleInboundSms` fetches once at the top of
+ *     the request. The executor uses it to (a) skip the action cold-start when
+ *     dispatching `convex_chat_reply`, and (b) lets `handleInboundSms` filter
+ *     redundant `convex_get_*` steps from the plan entirely.
+ *   - `PRELOADED_TOOLS` enumerates the tool names whose data is in `Preloaded`.
+ *   - `TERMINAL_TOOLS` enumerates the tools that mutate / send / reply — these
+ *     must run sequentially after the parallel context phase.
  */
 
 import { api } from "./_generated/api";
 import type { ActionCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { SourceLabel } from "./sources";
 import type { SmsPlanStep } from "./smsRouter";
 
 export type StepResult = {
@@ -14,9 +24,48 @@ export type StepResult = {
   error?: string;
 };
 
+// `Preloaded` mirrors the shape that handleInboundSms fetches at the top of
+// each inbound SMS. We define it from `Doc<...>` (not `FunctionReturnType<...>`)
+// to avoid the api.d.ts ↔ agent.ts type cycle that otherwise collapses these
+// to `any` inside the chat-reply helper.
+export type PreloadedAccount = Doc<"accounts"> & { source: SourceLabel };
+export type PreloadedAgreement = Doc<"agreements"> & {
+  fromName: string;
+  toName: string;
+  fromDisplayName: string;
+  toDisplayName: string;
+  source: "inbox";
+};
+export type PreloadedCard = Doc<"cards">;
+export type PreloadedSubscriber = Doc<"subscribers">;
+
+export type Preloaded = {
+  accounts: PreloadedAccount[];
+  agreements: PreloadedAgreement[];
+  cards: PreloadedCard[];
+  subscribers: PreloadedSubscriber[];
+};
+
 export type ExecuteState = {
   reply?: string;
+  preloaded?: Preloaded;
 };
+
+/** Tools whose data `handleInboundSms` already fetched in parallel. */
+export const PRELOADED_TOOLS = new Set<string>([
+  "convex_get_accounts",
+  "convex_get_agreements",
+  "convex_get_cards",
+  "convex_get_subscribers",
+]);
+
+/** Tools that mutate / send / reply. These must run after the context phase. */
+export const TERMINAL_TOOLS = new Set<string>([
+  "convex_create_message_card",
+  "convex_chat_reply",
+  "convex_send_briefing",
+  "convex_send_sms",
+]);
 
 export async function executeSmsPlanStep(
   ctx: ActionCtx,
@@ -24,6 +73,22 @@ export async function executeSmsPlanStep(
   state: ExecuteState,
 ): Promise<StepResult> {
   const { tool, args } = step;
+
+  // If `handleInboundSms` already loaded this data into `state.preloaded`,
+  // serve it from cache instead of re-querying Convex.
+  if (state.preloaded && PRELOADED_TOOLS.has(tool)) {
+    switch (tool) {
+      case "convex_get_accounts":
+        return ok(tool, state.preloaded.accounts);
+      case "convex_get_agreements":
+        return ok(tool, state.preloaded.agreements);
+      case "convex_get_cards":
+        return ok(tool, state.preloaded.cards);
+      case "convex_get_subscribers":
+        return ok(tool, state.preloaded.subscribers);
+    }
+  }
+
   try {
     switch (tool) {
       case "convex_get_accounts":
@@ -112,6 +177,10 @@ export async function executeSmsPlanStep(
         );
 
       case "convex_chat_reply": {
+        // NOTE: when called from `handleInboundSms`, that path short-circuits
+        // this step and calls `runChatReplyWithContext` directly so we skip
+        // both the action cold-start and the duplicate context fetch. This
+        // branch is the fallback for external callers of the executor.
         const r = await ctx.runAction(api.agent.chatReply, {
           phone: args.phone as string,
           body: args.body as string,
