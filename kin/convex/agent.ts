@@ -297,14 +297,17 @@ export const executeAction = action({
         result = { ok: true };
         break;
       }
-      case "dismiss": {
+      case "dismiss":
+      case "dispute_charge":
+      case "flag_review":
+      case "cancel_subscription":
+      default: {
+        // Byproduct cards (dup/creep/outlier) — no execution, just silence.
         await ctx.runMutation(api.engine.dismissCard, { cardId });
-        memoryNote = `Alex dismissed card: ${card.title}.`;
-        result = { dismissed: true };
+        memoryNote = `Alex acted on ${card.title} (${action.kind}: ${action.label}).`;
+        result = { dismissed: true, kind: action.kind };
         break;
       }
-      default:
-        throw new Error(`Unknown action kind: ${action.kind}`);
     }
 
     if (resolveAfter) {
@@ -439,7 +442,7 @@ export const bootstrapDemo = action({
   ): Promise<{ ok: boolean; cardId: string | null; message: string }> => {
     await ctx.runMutation(api.agentState.reset, {});
     await ctx.runMutation(api.seedDemo.seedDemo, {});
-    await ctx.runMutation(api.engine.runDetectors, {});
+    await ctx.runMutation(api.engine.runDetection, {});
     const cards = await ctx.runQuery(api.queries.getCards, {});
     const overdraft = cards.find((c) => c.type === "overdraft");
     if (!overdraft) return { ok: false, cardId: null, message: "No overdraft card" };
