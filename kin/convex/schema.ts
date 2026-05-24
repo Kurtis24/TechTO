@@ -8,7 +8,28 @@ export default defineSchema({
   people: defineTable({
     name: v.string(),
     role: v.string(), // "primary" | "partner" | etc — kept open
+    phone: v.optional(v.string()), // E.164 ("+14165551234") — outbound SMS target
   }),
+
+  // Daily-briefing opt-in. One row per phone. Phone uniqueness enforced in code,
+  // not the schema, since a person can swap phones and we don't want to migrate.
+  subscribers: defineTable({
+    phone: v.string(), // E.164
+    personId: v.optional(v.id("people")),
+    name: v.string(),
+    briefingHourLocal: v.number(), // 0-23, in their tz
+    tz: v.string(), // IANA tz, e.g. "America/Toronto"
+    active: v.boolean(),
+  }).index("by_phone", ["phone"]),
+
+  // One Backboard assistant + thread per inbound phone — gives each texter
+  // their own persistent memory across SMS conversations.
+  phoneAssistants: defineTable({
+    phone: v.string(), // E.164
+    assistantId: v.string(),
+    threadId: v.string(),
+    primed: v.optional(v.boolean()),
+  }).index("by_phone", ["phone"]),
 
   accounts: defineTable({
     ownerId: v.id("people"),

@@ -10,12 +10,16 @@
 
 import type * as agent from "../agent.js";
 import type * as agentState from "../agentState.js";
+import type * as briefing from "../briefing.js";
+import type * as crons from "../crons.js";
 import type * as engine from "../engine.js";
+import type * as http from "../http.js";
 import type * as mutations from "../mutations.js";
 import type * as queries from "../queries.js";
 import type * as seedDemo from "../seedDemo.js";
 import type * as sources from "../sources.js";
 import type * as spike from "../spike.js";
+import type * as twilioSend from "../twilioSend.js";
 
 import type {
   ApiFromModules,
@@ -26,12 +30,16 @@ import type {
 declare const fullApi: ApiFromModules<{
   agent: typeof agent;
   agentState: typeof agentState;
+  briefing: typeof briefing;
+  crons: typeof crons;
   engine: typeof engine;
+  http: typeof http;
   mutations: typeof mutations;
   queries: typeof queries;
   seedDemo: typeof seedDemo;
   sources: typeof sources;
   spike: typeof spike;
+  twilioSend: typeof twilioSend;
 }>;
 
 /**

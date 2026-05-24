@@ -180,4 +180,185 @@ export const resolveCard = mutation({
   },
 });
 
+// ─── createMessageCard ───────────────────────────────────────────────────────
+// Called by the Twilio inbound webhook (convex/http.ts). Maps the sender's
+// phone to a known person if possible, then writes an `info` card to the feed.
+export const createMessageCard = mutation({
+  args: {
+    from: v.string(),
+    to: v.optional(v.string()),
+    body: v.string(),
+    messageSid: v.optional(v.string()),
+    receivedAt: v.number(),
+  },
+  handler: async (ctx, { from, body, receivedAt }) => {
+    const senderName = (await nameForPhoneFromDb(ctx, from)) ?? prettyPhone(from);
+    const cardId = await ctx.db.insert("cards", {
+      type: "info",
+      severity: "info",
+      title: `Message from ${senderName}`,
+      body,
+      actions: [
+        {
+          id: "dismiss",
+          label: "Mark as read",
+          kind: "dismiss",
+          params: {},
+        },
+      ],
+      status: "open",
+      createdAt: receivedAt,
+    });
+    return { cardId };
+  },
+});
+
+// Look up a known name for an inbound phone in this order:
+// 1. people.phone match  →  person.name
+// 2. subscribers.phone match  →  subscriber.name
+// 3. ALEX_PHONE / DANA_PHONE env vars (legacy)
+async function nameForPhoneFromDb(
+  ctx: { db: { query: (t: "people" | "subscribers") => { collect: () => Promise<{ name: string; phone?: string }[]> } } },
+  e164: string,
+): Promise<string | null> {
+  const norm = e164.trim();
+  const ppl = await ctx.db.query("people").collect();
+  const matchP = ppl.find((p) => p.phone === norm);
+  if (matchP) return matchP.name;
+  const subs = await ctx.db.query("subscribers").collect();
+  const matchS = subs.find((s) => s.phone === norm);
+  if (matchS) return matchS.name;
+  if (norm === (process.env.ALEX_PHONE ?? "")) return "Alex";
+  if (norm === (process.env.DANA_PHONE ?? "")) return "Dana";
+  return null;
+}
+
+function prettyPhone(e164: string): string {
+  const m = e164.match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+  if (!m) return e164;
+  return `+1 (${m[1]}) ${m[2]}-${m[3]}`;
+}
+
+// ─── subscribe ───────────────────────────────────────────────────────────────
+// Idempotent on phone. Call from the Convex dashboard:
+//   subscribe({ phone: "+14165551234", name: "Alex", personId: "<id>" })
+export const subscribe = mutation({
+  args: {
+    phone: v.string(),
+    name: v.string(),
+    personId: v.optional(v.id("people")),
+    briefingHourLocal: v.optional(v.number()),
+    tz: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { phone, name, personId, briefingHourLocal, tz }
+  ) => {
+    const existing = await ctx.db
+      .query("subscribers")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .first();
+    const patch = {
+      name,
+      personId,
+      briefingHourLocal: briefingHourLocal ?? 8,
+      tz: tz ?? "America/Toronto",
+      active: true,
+    };
+    if (existing) {
+      await ctx.db.patch(existing._id, patch);
+      return existing._id;
+    }
+    return await ctx.db.insert("subscribers", { phone, ...patch });
+  },
+});
+
+export const unsubscribe = mutation({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    const row = await ctx.db
+      .query("subscribers")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .first();
+    if (row) await ctx.db.patch(row._id, { active: false });
+  },
+});
+
+// Convenience: stash a phone on a `people` row so existing demo data
+// (Alex, Dana) can text in and be recognized.
+export const setPersonPhone = mutation({
+  args: { personId: v.id("people"), phone: v.string() },
+  handler: async (ctx, { personId, phone }) => {
+    await ctx.db.patch(personId, { phone });
+  },
+});
+
+// ─── phoneAssistants helpers ────────────────────────────────────────────────
+// Per-phone Backboard assistant + thread, so each texter has persistent memory.
+export const getPhoneAssistant = mutation({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    const row = await ctx.db
+      .query("phoneAssistants")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .first();
+    if (!row) return null;
+    return {
+      assistantId: row.assistantId,
+      threadId: row.threadId,
+      primed: row.primed ?? false,
+    };
+  },
+});
+
+export const setPhoneAssistant = mutation({
+  args: {
+    phone: v.string(),
+    assistantId: v.string(),
+    threadId: v.string(),
+  },
+  handler: async (ctx, { phone, assistantId, threadId }) => {
+    const existing = await ctx.db
+      .query("phoneAssistants")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        assistantId,
+        threadId,
+        primed: false,
+      });
+      return existing._id;
+    }
+    return await ctx.db.insert("phoneAssistants", {
+      phone,
+      assistantId,
+      threadId,
+      primed: false,
+    });
+  },
+});
+
+export const markPhoneAssistantPrimed = mutation({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    const row = await ctx.db
+      .query("phoneAssistants")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .first();
+    if (row) await ctx.db.patch(row._id, { primed: true });
+  },
+});
+
+export const updatePhoneAssistantThread = mutation({
+  args: { phone: v.string(), threadId: v.string() },
+  handler: async (ctx, { phone, threadId }) => {
+    const row = await ctx.db
+      .query("phoneAssistants")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .first();
+    if (row) await ctx.db.patch(row._id, { threadId });
+  },
+});
+
 export type { Id };
